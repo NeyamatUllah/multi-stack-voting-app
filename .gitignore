@@ -19,7 +19,11 @@
 # IDE / OS
 .vscode/
 .idea/
-.DS_Store
+**/.DS_Store
+
+# .NET build artifacts
+src/worker/bin/
+src/worker/obj/
 
 # Claude Code workspace
 .claude/
