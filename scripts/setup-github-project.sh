@@ -17,7 +17,7 @@ set -euo pipefail
 
 OWNER="NeyamatUllah"
 REPO="NeyamatUllah/multi-stack-voting-app"
-PROJECT_TITLE="Multi-Stack Voting App — DevOps"
+PROJECT_TITLE="Multi-Stack Voting App - DevOps"
 BODY_DIR=$(mktemp -d)
 trap 'rm -rf "$BODY_DIR"' EXIT
 
@@ -48,7 +48,7 @@ echo "==> [1/5] Creating labels..."
 
 lbl() {
     gh label create "$1" --color "$2" --description "$3" \
-        --repo "$REPO" --force 2>/dev/null
+        --repo "$REPO" --force 2>/dev/null || true
     echo "    $1"
 }
 
@@ -87,11 +87,10 @@ echo "    Done"
 echo ""
 echo "==> [2/5] Creating GitHub Project..."
 
-gh project create --owner "$OWNER" --title "$PROJECT_TITLE" > /dev/null
-
-PROJECT_NUMBER=$(gh project list --owner "$OWNER" --format json \
-    | jq -r --arg t "$PROJECT_TITLE" '.projects[] | select(.title == $t) | .number' \
-    | head -1)
+PROJECT_NUMBER=$(gh project create \
+    --owner "$OWNER" \
+    --title "$PROJECT_TITLE" \
+    --format json | jq -r '.number')
 
 echo "    Project #${PROJECT_NUMBER}: ${PROJECT_TITLE}"
 
@@ -118,32 +117,16 @@ STATUS_FIELD_ID=$(echo "$PROJ_DATA" \
 echo "    Project node ID: $PROJECT_ID"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. Status columns
+# 3. Get default Status field "Todo" option ID
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
-echo "==> [3/5] Configuring Status columns..."
+echo "==> [3/5] Reading default Status field..."
 
-add_status() {
-    gh api graphql -f query="
-    mutation {
-      addProjectV2SingleSelectFieldOption(input: {
-        projectId: \"$PROJECT_ID\"
-        fieldId:   \"$STATUS_FIELD_ID\"
-        name:      \"$1\"
-        color:      $2
-        description: \"\"
-      }) { projectV2SingleSelectField { options { id name } } }
-    }" > /dev/null
-    echo "    $1"
-}
+# GitHub Projects v2 ships with Todo / In Progress / Done by default.
+# Custom column names can be set in the board UI (Settings → Fields → Status).
+# Suggested rename: Todo → 📋 Backlog, In Progress → 🚧 In Progress, Done → ✅ Done
+# Add two more manually: 🎯 Sprint, 👀 Review
 
-add_status "📋 Backlog"     GRAY
-add_status "🎯 Sprint"      BLUE
-add_status "🚧 In Progress" YELLOW
-add_status "👀 Review"      ORANGE
-add_status "✅ Done"        GREEN
-
-# Re-fetch to get the new Backlog option ID
 BACKLOG_OPTION_ID=$(gh api graphql -f query="
 query {
   user(login: \"$OWNER\") {
@@ -160,10 +143,13 @@ query {
 }" | jq -r '.data.user.projectV2.fields.nodes[]
      | select(.name == "Status")
      | .options[]
-     | select(.name == "📋 Backlog")
+     | select(.name == "Todo")
      | .id')
 
-echo "    Backlog option ID: $BACKLOG_OPTION_ID"
+echo "    Default 'Todo' option ID: $BACKLOG_OPTION_ID"
+echo "    NOTE: Rename columns in the board UI after the script finishes."
+echo "          Todo -> 📋 Backlog  |  In Progress -> 🚧 In Progress  |  Done -> ✅ Done"
+echo "          Then add: 🎯 Sprint and 👀 Review"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper: create issue, add to project, set status to Backlog
@@ -530,9 +516,9 @@ echo "    Project board : https://github.com/users/${OWNER}/projects/${PROJECT_N
 echo "    Issues        : https://github.com/${REPO}/issues"
 echo ""
 echo "    Next steps:"
-echo "    1. Open the project board and delete the default 'Todo / In Progress / Done'"
-echo "       options from the Status field — your custom columns are already added."
-echo "    2. Move EPIC 1 tasks 1.1 + 1.3 and EPIC 2 task 2.1 to ✅ Done"
-echo "       (they were completed before this script ran)."
-echo "    3. Move today's epics to 🎯 Sprint."
+echo "    1. Open the board -> Settings -> Fields -> Status"
+echo "       Rename: Todo -> Backlog | In Progress -> In Progress | Done -> Done"
+echo "       Add:    Sprint  and  Review"
+echo "    2. Move EPIC 1 (tasks 1.1, 1.3) and EPIC 2 (task 2.1) to Done."
+echo "    3. Move today's epics to Sprint."
 echo ""
