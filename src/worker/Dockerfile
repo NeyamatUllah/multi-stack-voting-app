@@ -17,10 +17,9 @@ WORKDIR /app
 # Copy the published output from the build stage
 COPY --from=build /app/publish ./
 
-# Set environment variables (can be overridden at runtime)
+# Set environment variables (non-sensitive only; DB_PASSWORD must be supplied at runtime)
 ENV DB_HOST=db
 ENV DB_USERNAME=postgres
-ENV DB_PASSWORD=postgres
 ENV DB_NAME=postgres
 ENV REDIS_HOST=redis
 
