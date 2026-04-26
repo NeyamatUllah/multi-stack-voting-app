@@ -1,0 +1,24 @@
+# Copy to environments/dev.tfvars and fill in your values.
+# This file is safe to commit — it contains no secrets.
+
+aws_region   = "us-east-1"
+project      = "voting-app"
+environment  = "dev"
+
+# Networking
+vpc_cidr                 = "10.0.0.0/16"
+azs                      = ["us-east-1a", "us-east-1b"]
+public_subnet_cidrs      = ["10.0.1.0/24", "10.0.2.0/24"]
+private_app_subnet_cidrs = ["10.0.10.0/24", "10.0.11.0/24"]
+private_db_subnet_cidrs  = ["10.0.20.0/24", "10.0.21.0/24"]
+
+# Compute
+key_name             = "voting-app-key"
+public_key_path      = "~/.ssh/voting-app.pub"
+bastion_instance_type = "t3.nano"
+app_instance_type    = "t3.micro"
+ami_id               = "ami-0e001c9271cf7f3b9"  # Ubuntu 22.04 LTS us-east-1
+
+# Security — set this to your actual public IP:
+# curl -s https://checkip.amazonaws.com
+my_ip_cidr = "0.0.0.0/0"  # REPLACE with your IP/32
