@@ -126,10 +126,27 @@ terraform apply
 ```
 
 Expected outputs:
-- S3 bucket: `voting-app-tfstate-<initials>-<date>`
-- DynamoDB table: `voting-app-tf-locks`
 
-> This state is stored **locally** (`infra/bootstrap/terraform.tfstate`). Keep it safe — it is not in the remote backend.
+| Resource | Name |
+|---|---|
+| S3 bucket | `voting-app-tfstate-20260426-ney` |
+| DynamoDB table | `voting-app-tf-locks-ney` |
+
+Copy the output values into `infra/terraform/backend.tf`:
+
+```hcl
+terraform {
+  backend "s3" {
+    bucket         = "voting-app-tfstate-20260426-ney"
+    key            = "voting-app/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "voting-app-tf-locks-ney"
+    encrypt        = true
+  }
+}
+```
+
+> This bootstrap state is stored **locally** at `infra/bootstrap/terraform.tfstate`. It is gitignored. Keep it — losing it means you must import the S3 bucket and DynamoDB table manually before you can destroy them.
 
 ---
 
@@ -270,7 +287,7 @@ terraform destroy
 | Vote / Result / Worker images pushed to DockerHub | ⏳ In Progress | | |
 | docker-compose.yml updated to own images | ⏳ In Progress | | |
 | Local docker compose E2E verified | ⏳ Pending | | |
-| Terraform state backend (S3 + DynamoDB) | ⏳ Pending | | |
+| Terraform state backend (S3 + DynamoDB) | ✅ Done | 2026-04-26 | `voting-app-tfstate-20260426-ney` + `voting-app-tf-locks-ney` |
 | Core Terraform (VPC, EC2, SGs) | ⏳ Pending | | |
 | Ansible foundation (SSH, inventory, docker role) | ⏳ Pending | | |
 | Application deployment via Ansible | ⏳ Pending | | |
