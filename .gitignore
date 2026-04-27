@@ -10,6 +10,7 @@
 *.retry
 *.pem
 *.key
+configuration/ansible/inventory/group_vars/all/bastion_ip.yml
 
 # Secrets
 .env

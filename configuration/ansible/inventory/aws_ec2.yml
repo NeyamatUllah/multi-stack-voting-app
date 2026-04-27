@@ -1,0 +1,17 @@
+---
+plugin: amazon.aws.aws_ec2
+regions:
+  - us-east-1
+filters:
+  "tag:Project": voting-app
+  "tag:Environment": dev
+  instance-state-name: running
+keyed_groups:
+  - key: tags.Role
+    prefix: ""
+    separator: ""
+hostnames:
+  - private-ip-address
+compose:
+  # bastion is reached via its public IP; all others via private IP + ProxyJump
+  ansible_host: public_ip_address if tags.Role == 'bastion' else private_ip_address

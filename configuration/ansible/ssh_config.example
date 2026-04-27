@@ -1,0 +1,27 @@
+# Copy relevant blocks into ~/.ssh/config
+# Replace <BASTION_IP> and private IPs with values from: terraform output
+
+Host voting-app-bastion
+  HostName <BASTION_IP>
+  User ubuntu
+  IdentityFile ~/.ssh/voting-app
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+
+Host voting-app-frontend
+  HostName <FRONTEND_PRIVATE_IP>
+  User ubuntu
+  IdentityFile ~/.ssh/voting-app
+  ProxyJump voting-app-bastion
+
+Host voting-app-backend
+  HostName <BACKEND_PRIVATE_IP>
+  User ubuntu
+  IdentityFile ~/.ssh/voting-app
+  ProxyJump voting-app-bastion
+
+Host voting-app-db
+  HostName <DB_PRIVATE_IP>
+  User ubuntu
+  IdentityFile ~/.ssh/voting-app
+  ProxyJump voting-app-bastion

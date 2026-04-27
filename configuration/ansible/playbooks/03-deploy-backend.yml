@@ -1,0 +1,8 @@
+---
+# Epic 7 — implemented in feat/epic7-ansible-deploy
+- name: Backend — deploy Worker
+  hosts: backend
+  gather_facts: true
+  become: true
+  roles:
+    - worker

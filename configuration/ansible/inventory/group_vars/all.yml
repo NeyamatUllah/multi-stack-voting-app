@@ -1,0 +1,6 @@
+---
+ansible_user: ubuntu
+ansible_ssh_private_key_file: ~/.ssh/voting-app
+
+project_name: voting-app
+docker_hub_username: neyamat
