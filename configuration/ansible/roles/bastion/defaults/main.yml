@@ -1,0 +1,4 @@
+---
+repo_url: "git@github.com:NeyamatUllah/multi-stack-voting-app.git"
+repo_dest: "/home/ubuntu/multi-stack-voting-app"
+deploy_key_dest: "/home/ubuntu/.ssh/deploy_key"

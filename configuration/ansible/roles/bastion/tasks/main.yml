@@ -1,0 +1,90 @@
+---
+# t3.nano has 512 MB RAM — swap was created on first run, skip if already present
+- name: Check if swap file exists
+  stat:
+    path: /swapfile
+  register: swapfile_stat
+
+- name: Create 1 GB swap file
+  command: fallocate -l 1G /swapfile
+  when: not swapfile_stat.stat.exists
+
+- name: Set swap file permissions
+  file:
+    path: /swapfile
+    mode: "0600"
+  when: not swapfile_stat.stat.exists
+
+- name: Format swap file
+  command: mkswap /swapfile
+  when: not swapfile_stat.stat.exists
+
+- name: Enable swap
+  command: swapon /swapfile
+  when: not swapfile_stat.stat.exists
+
+- name: Install python3-venv and git
+  apt:
+    name:
+      - python3-venv
+      - git
+    state: present
+    update_cache: false
+
+- name: Create Ansible virtualenv with ansible-core and AWS libs
+  pip:
+    name:
+      - ansible-core
+      - boto3
+      - botocore
+    virtualenv: /opt/ansible-env
+    virtualenv_command: python3 -m venv
+
+- name: Install Ansible collections from requirements.yml
+  command: /opt/ansible-env/bin/ansible-galaxy collection install -r {{ repo_dest }}/configuration/ansible/requirements.yml
+  changed_when: false
+
+- name: Create ansible symlink for ubuntu user convenience
+  file:
+    src: /opt/ansible-env/bin/ansible-playbook
+    dest: /usr/local/bin/ansible-playbook
+    state: link
+
+- name: Ensure .ssh directory exists for ubuntu
+  file:
+    path: /home/ubuntu/.ssh
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: "0700"
+
+- name: Write GitHub deploy key
+  copy:
+    content: "{{ github_deploy_key }}\n"
+    dest: "{{ deploy_key_dest }}"
+    owner: ubuntu
+    group: ubuntu
+    mode: "0600"
+
+- name: Configure SSH to use deploy key for github.com
+  blockinfile:
+    path: /home/ubuntu/.ssh/config
+    create: true
+    owner: ubuntu
+    group: ubuntu
+    mode: "0644"
+    marker: "# {mark} ANSIBLE MANAGED — github deploy key"
+    block: |
+      Host github.com
+        IdentityFile {{ deploy_key_dest }}
+        StrictHostKeyChecking no
+
+- name: Clone voting-app repository
+  git:
+    repo: "{{ repo_url }}"
+    dest: "{{ repo_dest }}"
+    accept_hostkey: true
+    key_file: "{{ deploy_key_dest }}"
+    update: true
+  become: false
+  become_user: ubuntu

@@ -48,6 +48,20 @@ resource "aws_iam_role_policy_attachment" "cloudwatch" {
   policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
 }
 
+resource "aws_iam_role_policy" "ec2_describe" {
+  name = "${var.project}-ec2-describe"
+  role = aws_iam_role.ec2.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ec2:DescribeInstances", "ec2:DescribeTags"]
+      Resource = "*"
+    }]
+  })
+}
+
 resource "aws_iam_instance_profile" "ec2" {
   name = "${var.project}-ec2-profile"
   role = aws_iam_role.ec2.name
