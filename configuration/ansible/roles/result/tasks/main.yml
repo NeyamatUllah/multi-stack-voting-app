@@ -9,4 +9,4 @@
       PG_HOST: "{{ hostvars[groups['db'][0]]['private_ip_address'] }}"
       PG_PASSWORD: "{{ postgres_password }}"
     ports:
-      - "8081:80"
+      - "5001:80"

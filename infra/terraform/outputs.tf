@@ -78,3 +78,20 @@ output "ssh_frontend_via_bastion" {
   description = "SSH command for frontend via ProxyJump"
   value       = "ssh -i ~/.ssh/voting-app -J ubuntu@${module.compute.bastion_public_ip} ubuntu@${module.compute.frontend_private_ip}"
 }
+
+# ─── ALB ──────────────────────────────────────────────────────────────────────
+
+output "alb_dns_name" {
+  description = "ALB DNS name — public entry point"
+  value       = module.alb.alb_dns_name
+}
+
+output "vote_url" {
+  description = "Vote app URL"
+  value       = "http://${module.alb.alb_dns_name}/"
+}
+
+output "result_url" {
+  description = "Result app URL"
+  value       = "http://${module.alb.alb_dns_name}/result"
+}

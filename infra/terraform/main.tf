@@ -40,3 +40,15 @@ module "compute" {
   backend_sg_id  = module.security.backend_sg_id
   db_sg_id       = module.security.db_sg_id
 }
+
+module "alb" {
+  source = "./modules/alb"
+
+  project     = var.project
+  environment = var.environment
+  vpc_id      = module.networking.vpc_id
+
+  public_subnet_ids    = module.networking.public_subnet_ids
+  alb_sg_id            = module.security.alb_sg_id
+  frontend_instance_id = module.compute.frontend_instance_id
+}
