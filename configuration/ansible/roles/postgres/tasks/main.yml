@@ -1,2 +1,20 @@
 ---
-# Epic 7 — implemented in feat/epic7-ansible-deploy
+- name: Create postgres data volume
+  community.docker.docker_volume:
+    name: postgres_data
+    state: present
+
+- name: Run postgres container
+  community.docker.docker_container:
+    name: postgres
+    image: postgres:15-alpine
+    state: started
+    restart_policy: always
+    env:
+      POSTGRES_USER: "{{ postgres_user }}"
+      POSTGRES_PASSWORD: "{{ postgres_password }}"
+      POSTGRES_DB: "{{ postgres_db }}"
+    volumes:
+      - "postgres_data:/var/lib/postgresql/data"
+    ports:
+      - "5432:5432"

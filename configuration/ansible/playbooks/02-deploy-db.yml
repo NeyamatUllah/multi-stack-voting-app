@@ -1,9 +1,7 @@
 ---
-# Epic 7 — implemented in feat/epic7-ansible-deploy
 - name: DB — deploy Postgres + Redis
   hosts: db
   gather_facts: true
   become: true
   roles:
     - postgres
-    - redis

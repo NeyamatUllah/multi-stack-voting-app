@@ -1,2 +1,15 @@
 ---
-# Epic 7 — implemented in feat/epic7-ansible-deploy
+- name: Run worker container
+  community.docker.docker_container:
+    name: worker
+    image: "{{ docker_hub_username }}/worker:latest"
+    state: started
+    restart_policy: always
+    networks:
+      - name: backend_net
+    env:
+      REDIS_HOST: redis
+      DB_HOST: "{{ hostvars[groups['db'][0]]['private_ip_address'] }}"
+      DB_USERNAME: "{{ postgres_user }}"
+      DB_PASSWORD: "{{ postgres_password }}"
+      DB_NAME: "{{ postgres_db }}"

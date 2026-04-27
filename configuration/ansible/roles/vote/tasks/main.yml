@@ -1,2 +1,11 @@
 ---
-# Epic 7 — implemented in feat/epic7-ansible-deploy
+- name: Run vote container
+  community.docker.docker_container:
+    name: vote
+    image: "{{ docker_hub_username }}/vote:latest"
+    state: started
+    restart_policy: always
+    env:
+      REDIS_HOST: "{{ hostvars[groups['backend'][0]]['private_ip_address'] }}"
+    ports:
+      - "8080:80"
