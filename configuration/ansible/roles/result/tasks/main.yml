@@ -1,2 +1,12 @@
 ---
-# Epic 7 — implemented in feat/epic7-ansible-deploy
+- name: Run result container
+  community.docker.docker_container:
+    name: result
+    image: "{{ docker_hub_username }}/result:latest"
+    state: started
+    restart_policy: always
+    env:
+      PG_HOST: "{{ hostvars[groups['db'][0]]['private_ip_address'] }}"
+      PG_PASSWORD: "{{ postgres_password }}"
+    ports:
+      - "8081:80"

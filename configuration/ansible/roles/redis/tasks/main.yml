@@ -1,2 +1,16 @@
 ---
-# Epic 7 — implemented in feat/epic7-ansible-deploy
+- name: Create backend Docker network
+  community.docker.docker_network:
+    name: backend_net
+    state: present
+
+- name: Run redis container
+  community.docker.docker_container:
+    name: redis
+    image: redis:alpine
+    state: started
+    restart_policy: always
+    networks:
+      - name: backend_net
+    ports:
+      - "6379:6379"
