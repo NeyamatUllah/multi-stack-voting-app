@@ -1,0 +1,8 @@
+---
+# Epic 11 — implemented in feat/epic11-monitoring
+- name: All app instances — CloudWatch Agent
+  hosts: frontend:backend:db
+  gather_facts: true
+  become: true
+  roles:
+    - cloudwatch_agent

@@ -1,0 +1,8 @@
+---
+# Bastion is reachable directly — ansible_host is set to public IP via inventory compose.
+# No ProxyJump needed.
+
+# t3.nano has 512 MB RAM — keep packages minimal to avoid OOM during install
+common_packages:
+  - curl
+  - unzip

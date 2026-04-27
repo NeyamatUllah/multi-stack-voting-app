@@ -1,0 +1,7 @@
+---
+- name: Bastion — common setup
+  hosts: bastion
+  gather_facts: true
+  become: true
+  roles:
+    - common

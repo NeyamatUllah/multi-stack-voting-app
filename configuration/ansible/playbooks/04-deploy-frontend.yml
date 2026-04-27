@@ -1,0 +1,9 @@
+---
+# Epic 7 — implemented in feat/epic7-ansible-deploy
+- name: Frontend — deploy Vote + Result
+  hosts: frontend
+  gather_facts: true
+  become: true
+  roles:
+    - vote
+    - result

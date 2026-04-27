@@ -1,0 +1,8 @@
+---
+- name: App instances — common setup + Docker
+  hosts: frontend:backend:db
+  gather_facts: true
+  become: true
+  roles:
+    - common
+    - docker

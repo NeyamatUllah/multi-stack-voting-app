@@ -1,0 +1,6 @@
+---
+- import_playbook: 00-bastion-setup.yml
+- import_playbook: 01-docker-install.yml
+- import_playbook: 02-deploy-db.yml
+- import_playbook: 03-deploy-backend.yml
+- import_playbook: 04-deploy-frontend.yml
