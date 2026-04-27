@@ -31,15 +31,17 @@
     state: present
     update_cache: false
 
-- name: Create Ansible virtualenv with ansible-core
+- name: Create Ansible virtualenv with ansible-core and AWS libs
   pip:
     name:
       - ansible-core
+      - boto3
+      - botocore
     virtualenv: /opt/ansible-env
     virtualenv_command: python3 -m venv
 
-- name: Install community.docker collection
-  command: /opt/ansible-env/bin/ansible-galaxy collection install community.docker
+- name: Install Ansible collections from requirements.yml
+  command: /opt/ansible-env/bin/ansible-galaxy collection install -r {{ repo_dest }}/configuration/ansible/requirements.yml
   changed_when: false
 
 - name: Create ansible symlink for ubuntu user convenience
