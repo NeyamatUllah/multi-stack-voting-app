@@ -1,0 +1,8 @@
+rules:
+  # result image sits at ~83% because apt-get upgrade on node:18.20.8-slim (debian 12.11)
+  # overlays ~50 packages to reach debian 12.14 security patch level, leaving old shared
+  # libraries in immutable base layers. Accepted tradeoff for Phase 1 security hardening.
+  # Resolve by upgrading to Node 20 LTS (newer debian base, no upgrade needed).
+  lowestEfficiency: 0.82
+  highestWastedBytes: "100 MB"
+  highestUserWastedPercent: 0.50

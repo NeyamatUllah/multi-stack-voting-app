@@ -1,0 +1,43 @@
+# Accepted risks — OS packages with no fix available from Debian upstream.
+# These are tracked as known risks; re-evaluate when a fix is released.
+
+# zlib1g — Debian has explicitly marked this will_not_fix
+CVE-2023-45853
+
+# curl / libcurl4 — no upstream fix available as of 2026-05-31
+CVE-2026-5773
+CVE-2026-6276
+
+# ncurses — no fix available as of 2026-05-31
+CVE-2025-69720
+
+# perl-base — no fix available in Debian repos as of 2026-05-31
+CVE-2026-42496
+CVE-2026-8376
+CVE-2026-42497
+CVE-2026-48962
+CVE-2026-9538
+
+# openldap libldap-2.5-0 — no fix available as of 2026-05-31
+CVE-2023-2953
+
+# libssh2-1 — no fix available as of 2026-05-31
+CVE-2026-7598
+
+# libsqlite3-0 — no fix available as of 2026-05-31 (vote image)
+CVE-2025-7458
+
+# npm v10 internal packages (tar, glob, minimatch, cross-spawn) in result image.
+# These are bundled inside /usr/local/lib/node_modules/npm/node_modules/ — not our app code.
+# npm v10.x (Node 18 compatible) has no published fix; re-evaluate when upgrading to Node 20+.
+CVE-2024-21538
+CVE-2025-64756
+CVE-2026-26996
+CVE-2026-27903
+CVE-2026-27904
+CVE-2026-23745
+CVE-2026-23950
+CVE-2026-24842
+CVE-2026-26960
+CVE-2026-29786
+CVE-2026-31802
