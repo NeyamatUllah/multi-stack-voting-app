@@ -13,6 +13,11 @@ services:
     networks:
       - frontend
       - backend
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
     deploy:
       resources:
         limits:
@@ -35,6 +40,11 @@ services:
       - frontend
       - backend
       - data
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
     deploy:
       resources:
         limits:
@@ -56,6 +66,8 @@ services:
     networks:
       - backend
       - data
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -71,6 +83,8 @@ services:
       interval: "5s"
     networks:
       - backend
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -91,6 +105,8 @@ services:
       interval: "5s"
     networks:
       - data
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
