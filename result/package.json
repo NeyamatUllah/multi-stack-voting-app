@@ -4,7 +4,8 @@
   "description": "",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "eslint server.js views/app.js"
   },
   "author": "",
   "license": "MIT",
@@ -23,5 +24,8 @@
     "cross-spawn": "^7.0.6",
     "ws": "^8.17.1",
     "socket.io-parser": "^4.2.6"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.1"
   }
 }

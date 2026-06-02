@@ -43,7 +43,7 @@ app.controller('statsCtrl', function($scope) {
   };
 
   // "message" is just an example event to signal readiness
-  socket.on('message', function(data) {
+  socket.on('message', function(_data) {
     init();
   });
 });
