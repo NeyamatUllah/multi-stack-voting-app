@@ -169,19 +169,365 @@ Look for:
 
 ## Phase 2 — Docker Compose: Networking & Secrets
 
-**Goal:** Enforce network isolation and remove hardcoded secrets.
+**Goal:** Enforce least-privilege network isolation between services and remove all hardcoded credentials from version control.
 
 | Task | Tool |
 |------|------|
-| Secrets via env file | Docker Compose `.env` |
-| Validate compose config | `docker compose config` |
-| Local secret management | **direnv** or **dotenv-vault** |
+| Network segmentation | Docker Compose named networks |
+| Secrets management | `.env` file + `${VAR}` substitution |
+| Validate compose | `docker compose config` |
+| Secret scanning | **Gitleaks** |
+| Security hardening | `security_opt`, `read_only`, resource limits |
 
-Key actions:
-- Split single `back-tier` network into `front-tier` (vote, result) and `back-tier` (redis, db, worker)
-- Move all credentials out of `docker-compose.yml` into `.env` (gitignored)
-- Add resource limits (`mem_limit`, `cpus`) per service
-- Add `read_only: true` + `tmpfs` where applicable
+---
+
+### Current State Gaps
+
+| Gap | Risk |
+|-----|------|
+| Single flat `back-tier` network — all 5 services can reach each other | HIGH — compromised vote container can talk directly to db |
+| `POSTGRES_PASSWORD: "postgres"` hardcoded in docker-compose.yml | CRITICAL — committed to git history |
+| No resource limits on any service | MEDIUM — one runaway container can starve the host |
+| No `no-new-privileges` flag | MEDIUM — SUID binaries could be exploited inside containers |
+
+---
+
+### Network Design
+
+Three networks named to mirror the Azure VNet subnet model you will deploy to later:
+
+```
+Internet
+    │
+ [frontend]  ──  vote, result          (public-facing, port-exposed)
+    │
+ [backend]   ──  vote, result,         (private app tier)
+                 worker, redis
+    │
+ [data]      ──  result, worker, db    (most private, persistent storage only)
+```
+
+**Why redis sits in `backend` (Tier 2), not `data` (Tier 3):**
+Redis is a message queue — application-layer middleware, ephemeral by nature. If Redis goes down, in-flight votes are lost; it is not the system of record. PostgreSQL is. In Azure this maps to: Azure Cache for Redis in the backend subnet, Azure Database for PostgreSQL in the data subnet.
+
+| Network | Members | `internal`? | Why |
+|---------|---------|-------------|-----|
+| `frontend` | vote, result | No | Port-exposed; will become the public subnet in Azure. In a later phase nginx/AGFW will be the only member here and vote/result will move to backend-only. |
+| `backend` | vote, result, worker, redis | Yes | Private app tier. vote reaches redis here. worker processes from redis here. |
+| `data` | result, worker, db | Yes | Most private. Only services that read/write PostgreSQL join this network. vote cannot reach db — no shared network. |
+
+**Key isolation achieved:**
+
+| Path | Result | Why |
+|------|--------|-----|
+| vote → redis | ✅ Allowed | Both on backend |
+| vote → db | ✅ **Blocked** | vote has no path to data network |
+| worker → redis | ✅ Allowed | Both on backend |
+| worker → db | ✅ Allowed | Both on data |
+| result → db | ✅ Allowed | Both on data |
+| result → redis | ⚠ Allowed | Both on backend — acceptable; redis is app-tier |
+
+**Future alignment:**
+- Phase 3/Azure: add nginx in `frontend`, move vote+result to `backend` only
+- Phase 5/K8s: enforce with `NetworkPolicy`
+- Phase 8/IaC: enforce with NSGs on Azure VNet subnets
+
+---
+
+### Step 1 — Redesign networks in docker-compose.yml
+
+Replace the single `back-tier` with three named networks:
+
+```yaml
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+    internal: true    # no outbound internet — app tier is private
+  data:
+    driver: bridge
+    internal: true    # most private — only db lives here
+```
+
+Assign services:
+
+```yaml
+vote:
+  networks: [frontend, backend]
+
+result:
+  networks: [frontend, backend, data]
+
+worker:
+  networks: [backend, data]
+
+redis:
+  networks: [backend]
+
+db:
+  networks: [data]
+```
+
+> `internal: true` on `backend` and `data` prevents containers from making outbound internet calls. `frontend` is not internal because vote and result need to respond to browser requests (Docker port-maps work regardless, but internal: false keeps it explicit).
+
+---
+
+### Step 2 — Create `.env`
+
+Create `.env` at the repo root (already gitignored from Phase 1):
+
+```env
+# PostgreSQL
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_DB=postgres
+
+# Vote options (override to change the ballot)
+OPTION_A=Cats
+OPTION_B=Dogs
+```
+
+> For a real production deployment, replace `postgres/postgres` with strong random credentials before deploying.
+
+---
+
+### Step 3 — Create `.env.example`
+
+Commit a safe template so collaborators know what variables are required:
+
+```env
+# PostgreSQL — replace all values before running
+POSTGRES_USER=changeme
+POSTGRES_PASSWORD=changeme_secure_password_here
+POSTGRES_DB=votes
+
+# Vote ballot options
+OPTION_A=Cats
+OPTION_B=Dogs
+```
+
+---
+
+### Step 4 — Update docker-compose.yml to use variables
+
+Replace every hardcoded secret with `${VAR}` references:
+
+```yaml
+db:
+  image: postgres:15-alpine
+  environment:
+    POSTGRES_USER: "${POSTGRES_USER}"
+    POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+    POSTGRES_DB: "${POSTGRES_DB}"
+
+worker:
+  environment:
+    DB_HOST: db
+    DB_USERNAME: "${POSTGRES_USER}"
+    DB_PASSWORD: "${POSTGRES_PASSWORD}"
+    DB_NAME: "${POSTGRES_DB}"
+
+result:
+  environment:
+    PG_USER: "${POSTGRES_USER}"
+    PG_PASSWORD: "${POSTGRES_PASSWORD}"
+    PG_DATABASE: "${POSTGRES_DB}"
+
+vote:
+  environment:
+    OPTION_A: "${OPTION_A}"
+    OPTION_B: "${OPTION_B}"
+```
+
+Validate substitution works before running:
+
+```bash
+docker compose config
+```
+
+All `${VAR}` references should be replaced with values from `.env` in the output.
+
+---
+
+### Step 5 — Add resource limits
+
+Prevent any single container from exhausting host CPU or memory. Add to each service:
+
+```yaml
+vote:
+  deploy:
+    resources:
+      limits:
+        cpus: '0.50'
+        memory: 128M
+      reservations:
+        cpus: '0.10'
+        memory: 64M
+
+result:
+  deploy:
+    resources:
+      limits:
+        cpus: '0.50'
+        memory: 128M
+
+worker:
+  deploy:
+    resources:
+      limits:
+        cpus: '0.50'
+        memory: 256M   # .NET runtime needs a bit more headroom
+
+redis:
+  deploy:
+    resources:
+      limits:
+        cpus: '0.25'
+        memory: 64M
+
+db:
+  deploy:
+    resources:
+      limits:
+        cpus: '0.50'
+        memory: 256M
+```
+
+---
+
+### Step 6 — Add security hardening options
+
+Add to every service in docker-compose.yml:
+
+```yaml
+security_opt:
+  - no-new-privileges:true
+```
+
+This prevents any process inside the container from gaining elevated privileges via SUID/SGID binaries — closes a common container escape vector.
+
+For `vote` and `result` (stateless services), also add a read-only filesystem with a tmpfs mount for `/tmp`:
+
+```yaml
+vote:
+  read_only: true
+  tmpfs:
+    - /tmp
+
+result:
+  read_only: true
+  tmpfs:
+    - /tmp
+```
+
+> Do not add `read_only` to `db` — PostgreSQL writes to its data directory.
+
+---
+
+### Step 7 — Scan for committed secrets with Gitleaks
+
+Install Gitleaks:
+
+```bash
+curl -sSfL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_$(uname -s)_amd64.tar.gz | tar -xz -C ~/.local/bin gitleaks
+```
+
+Scan the full git history:
+
+```bash
+gitleaks detect --source . --log-opts HEAD
+```
+
+**Expected finding:** The original upstream commit (`ad98dee`) hardcoded `postgres/postgres` in `docker-compose.yml`. Gitleaks will flag this.
+
+Since these are non-production placeholder credentials (not real secrets), the correct action is:
+- Document the finding
+- Accept the risk for this learning repo (password was never a real secret)
+- Add a `.gitleaks.toml` allowlist entry for that specific commit
+
+For a real project with actual leaked credentials: rotate the credentials immediately, then use `git filter-repo` to scrub history.
+
+Create `.gitleaks.toml`:
+
+```toml
+title = "Gitleaks config"
+
+[allowlist]
+  description = "Accepted historical findings"
+  commits = [
+    "ad98dee",  # original upstream repo commit — postgres/postgres placeholder, not real credentials
+  ]
+```
+
+Re-run — scan should pass:
+
+```bash
+gitleaks detect --source . --log-opts HEAD
+```
+
+---
+
+### Step 8 — Test and verify isolation
+
+Start the stack:
+
+```bash
+docker compose up -d
+```
+
+**Functional test:**
+- Vote UI loads at `http://localhost:8080`
+- Results update in real time at `http://localhost:8081`
+
+**Network isolation test:**
+
+```bash
+# vote should NOT be able to reach db (different network)
+docker compose exec vote ping -c 2 db
+# Expected: ping: bad address 'db' — or no route to host
+
+# vote SHOULD be able to reach redis
+docker compose exec vote ping -c 2 redis
+# Expected: 64 bytes from ... (success)
+
+# result should NOT be able to reach redis
+docker compose exec result ping -c 2 redis
+# Expected: ping: bad address 'redis'
+
+# result SHOULD be able to reach db
+docker compose exec result ping -c 2 db
+# Expected: success
+```
+
+**Secret hygiene check:**
+
+```bash
+# Confirm .env is not tracked
+git status
+# .env should NOT appear — it is gitignored
+
+# Confirm no secrets in docker-compose.yml
+grep -i "password\|secret\|postgres" docker-compose.yml
+# Should only show ${VAR} references, no literal values
+```
+
+---
+
+### Definition of Done for Phase 2
+
+- [ ] Three networks defined: `vote-redis`, `result-db`, `worker-net` — all `internal: true`
+- [ ] vote cannot ping db (verified by exec test)
+- [ ] result cannot ping redis (verified by exec test)
+- [ ] All hardcoded credentials removed from docker-compose.yml — only `${VAR}` references
+- [ ] `.env` exists locally and is gitignored
+- [ ] `.env.example` committed with placeholder values
+- [ ] `docker compose config` resolves all variables cleanly
+- [ ] Resource limits set on all five services
+- [ ] `no-new-privileges:true` on all services
+- [ ] `read_only: true` + tmpfs on vote and result
+- [ ] Gitleaks scan passes (with `.gitleaks.toml` allowlist for upstream commit)
+- [ ] `docker compose up` — full stack functional
 
 ---
 
