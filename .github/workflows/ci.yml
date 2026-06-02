@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - staging
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - '.gitignore'
+      - 'LICENSE'
+      - 'SECURITY.md'
 
 jobs:
   lint-python:
