@@ -3,8 +3,8 @@
 
 services:
   vote:
-    image: pokfinner/vote:latest
- #  build: ./vote
+    build: ./vote
+    image: ghcr.io/neyamatullah/vote:latest
     depends_on:
       redis:
         condition: service_healthy 
@@ -14,8 +14,8 @@ services:
       - back-tier
 
   result:
-    image: pokfinner/result:latest
- #  build: ./result
+    build: ./result
+    image: ghcr.io/neyamatullah/result:latest
     depends_on:
       db:
         condition: service_healthy 
@@ -25,8 +25,8 @@ services:
       - back-tier
 
   worker:
- #  build: ./worker
-    image: pokfinner/worker:latest
+    build: ./worker
+    image: ghcr.io/neyamatullah/worker:latest
     depends_on:
       redis:
         condition: service_healthy 
