@@ -544,7 +544,50 @@ grep -i "password\|secret\|postgres" docker-compose.yml
 | Image CVE gate | **Trivy Action** (`aquasecurity/trivy-action`) |
 | Container registry | **Docker Hub** or **GHCR** |
 
-Pipeline stages: lint → build → scan → push (on `main` merge only)
+Pipeline stages: lint → build → scan → push (on `staging` push)
+
+### Definition of Done for Phase 3
+
+- [x] `lint-python` passes (Flake8 + Ruff on `vote/`)
+- [x] `lint-js` passes (ESLint on `result/`)
+- [x] `lint-dotnet` passes (`dotnet format` on `worker/`)
+- [x] `build-and-scan` builds all 3 images, Trivy finds 0 HIGH/CRITICAL CVEs
+- [x] `push` job runs on staging merge and images appear in GHCR
+- [x] CI trigger scoped to `staging` branch only (not every feature branch push)
+
+### Phase 3 — Actual Results (2026-06-02)
+
+**Workflow:** `.github/workflows/ci.yml` — 5 jobs, triggers on push to `staging`
+
+| Job | Runs on | Result |
+|-----|---------|--------|
+| lint-python | every staging push | Flake8 + Ruff pass |
+| lint-js | every staging push | ESLint pass |
+| lint-dotnet | every staging push | dotnet format pass |
+| build-and-scan | after all lint jobs (matrix: vote/result/worker) | 0 HIGH/CRITICAL CVEs |
+| push | after build-and-scan | images pushed to GHCR with `:latest` + `:<sha>` |
+
+**Pre-existing issues cleaned up to pass linters:**
+
+| File | Issue | Fix |
+|------|-------|-----|
+| `vote/app.py` | E302 (1 blank line before functions) | Added 2nd blank line; E231 (missing space after `,` in route methods) |
+| `result/server.js` | `no-redeclare` — `Pool` declared twice | Removed unused declaration from top var chain |
+| `result/views/app.js` | `no-unused-vars` — `data` param unused | Renamed to `_data` |
+| `result/server.js` | `no-unused-vars` — `done` param unused | Renamed to `_done` |
+| `worker/Program.cs` | Trailing whitespace on blank line | Stripped spaces |
+
+**Config files added:**
+
+| File | Purpose |
+|------|---------|
+| `vote/pyproject.toml` | Ruff: E/F rules, 120-char line limit |
+| `result/.eslintrc.json` | ESLint 8: Node env, browser overrides for `views/`, `_`-prefixed unused args allowed |
+| `result/package.json` | eslint devDependency + `npm run lint` script |
+
+**Lesson learned:** Pinned `aquasecurity/trivy-action@0.28.0` — tag did not exist. Corrected to `v0.36.0` (actual latest release).
+
+**Branch/PRs:** `feature/phase3-ci-cd` → PR #11 → `dev`; fix trivy → PR #14; simplify trigger → PR #17; promoted via PRs #12/#13/#15/#16/#18/#19 → `staging` → `main`
 
 ---
 
