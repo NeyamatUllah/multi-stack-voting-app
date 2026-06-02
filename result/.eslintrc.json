@@ -1,0 +1,27 @@
+{
+  "env": {
+    "node": true,
+    "es2021": true
+  },
+  "extends": "eslint:recommended",
+  "parserOptions": {
+    "ecmaVersion": 2021
+  },
+  "ignorePatterns": ["views/angular.min.js", "views/socket.io.js"],
+  "rules": {
+    "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }]
+  },
+  "overrides": [
+    {
+      "files": ["views/app.js"],
+      "env": {
+        "browser": true,
+        "node": false
+      },
+      "globals": {
+        "angular": "readonly",
+        "io": "readonly"
+      }
+    }
+  ]
+}
