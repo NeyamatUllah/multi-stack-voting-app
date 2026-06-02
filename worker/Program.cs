@@ -21,7 +21,7 @@ namespace Worker
                 var dbUsername = Environment.GetEnvironmentVariable("DB_USERNAME") ?? "postgres";
                 var dbPassword = Environment.GetEnvironmentVariable("DB_PASSWORD") ?? "postgres";
                 var dbName = Environment.GetEnvironmentVariable("DB_NAME") ?? "postgres";
-                
+
                 var redisHost = Environment.GetEnvironmentVariable("REDIS_HOST") ?? "redis";
 
                 // Construct the connection strings
