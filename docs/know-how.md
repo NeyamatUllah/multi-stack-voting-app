@@ -10,6 +10,7 @@ Each entry is a real question asked during implementation, answered in context.
 - [Is Phase 4 (SAST & Dependency Scanning) also part of CI/CD?](#is-phase-4-sast--dependency-scanning-also-part-of-cicd)
 - [What is SAST?](#what-is-sast)
 - [What is a Kubernetes cluster?](#what-is-a-kubernetes-cluster)
+- [Is Ingress a tool for Kubernetes?](#is-ingress-a-tool-for-kubernetes)
 
 ---
 
@@ -177,5 +178,45 @@ In production (Phase 8, Azure/AWS/GCP), the control plane is managed for you (AK
 > Kubernetes says **"I want this app to exist — figure out where to run it."**
 
 You describe the **desired state**. The cluster continuously reconciles reality to match it.
+
+---
+## Is Ingress a tool for Kubernetes?
+
+Ingress is a **native Kubernetes resource**, not a third-party tool. But it has two parts that are easy to confuse:
+
+**Ingress (the resource)** — a Kubernetes API object you write in YAML that defines routing rules:
+
+```yaml
+- path: /         → route to vote Service
+- path: /result   → route to result Service
+```
+
+**Ingress Controller** — a pod running inside the cluster that reads those rules and actually enforces them. Without a controller, an Ingress resource does nothing. The most common controller is **ingress-nginx** (nginx running as a K8s pod).
+
+### The flow
+
+```
+Browser → ingress-nginx pod (controller) → reads Ingress rules → routes to Service → Pod
+```
+
+### Analogy
+
+| Kubernetes | Analogy |
+|-----------|---------|
+| `Ingress` resource | A routing table (the rules, on paper) |
+| Ingress Controller | The router (the hardware that enforces the rules) |
+
+### In this project
+
+- `Ingress` = the `k8s/ingress.yaml` file you write
+- `ingress-nginx` = installed in Minikube via `minikube addons enable ingress`; on a real cluster (AKS/EKS) you install it yourself via Helm
+
+### Why not just use a NodePort or LoadBalancer Service?
+
+| Approach | Problem |
+|---------|---------|
+| NodePort | Exposes a random high port (e.g. 32456) — not clean for HTTP |
+| LoadBalancer | Provisions a cloud load balancer per Service — expensive and wasteful for multiple services |
+| **Ingress** | One entry point, routes to many services by path/host — the correct production pattern |
 
 ---
