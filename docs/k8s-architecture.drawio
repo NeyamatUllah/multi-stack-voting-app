@@ -1,0 +1,257 @@
+<mxfile host="65bd71144e">
+    <diagram name="K8s Architecture" id="k8s-architecture">
+        <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+
+                <!-- ===== BROWSER (outside cluster) ===== -->
+                <mxCell id="browser" value="Browser" style="shape=mxgraph.cisco.computers_and_peripherals.pc;sketch=0;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;verticalLabelPosition=bottom;verticalAlign=top;align=center;" parent="1" vertex="1">
+                    <mxGeometry x="20" y="430" width="70" height="60" as="geometry"/>
+                </mxCell>
+
+                <!-- ===== MINIKUBE CLUSTER BOUNDARY ===== -->
+                <mxCell id="cluster-box" value="Minikube Cluster  (--driver=docker  --cni=calico)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;strokeWidth=3;fontStyle=1;fontSize=13;fontColor=#333333;verticalAlign=top;align=left;spacingLeft=10;spacingTop=8;" parent="1" vertex="1">
+                    <mxGeometry x="130" y="20" width="1480" height="910" as="geometry"/>
+                </mxCell>
+
+                <!-- ===== CONTROL PLANE ===== -->
+                <mxCell id="cp-box" value="Control Plane" style="swimlane;startSize=25;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="150" y="55" width="240" height="150" as="geometry"/>
+                </mxCell>
+                <mxCell id="cp-api" value="API Server" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="160" y="90" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="cp-sched" value="Scheduler" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="275" y="90" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="cp-ctrl" value="Controller Mgr" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="160" y="135" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="cp-etcd" value="etcd" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="275" y="135" width="100" height="30" as="geometry"/>
+                </mxCell>
+
+                <!-- ===== CALICO CNI ===== -->
+                <mxCell id="calico" value="Calico CNI — NetworkPolicy enforced" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="150" y="220" width="240" height="30" as="geometry"/>
+                </mxCell>
+
+                <!-- ===== INGRESS-NGINX ===== -->
+                <mxCell id="nginx" value="&lt;b&gt;ingress-nginx&lt;/b&gt;&lt;br&gt;controller pod&lt;br&gt;&lt;font style='font-size:9px'&gt;192.168.49.2:80&lt;br&gt;voting.local /  →  vote&lt;br&gt;voting.local /result  →  result&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="155" y="390" width="175" height="90" as="geometry"/>
+                </mxCell>
+
+                <!-- ===== CONFIGMAP ===== -->
+                <mxCell id="cm" value="&lt;b&gt;ConfigMap: app-config&lt;/b&gt;&lt;br&gt;&lt;font style='font-size:9px'&gt;OPTION_A=Cats  OPTION_B=Dogs&lt;br&gt;REDIS_HOST=redis  DB_HOST=db&lt;/font&gt;" style="shape=note;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;size=12;" parent="1" vertex="1">
+                    <mxGeometry x="470" y="35" width="210" height="70" as="geometry"/>
+                </mxCell>
+
+                <!-- ===== SECRET ===== -->
+                <mxCell id="secret" value="&lt;b&gt;Secret: db-credentials&lt;/b&gt;&lt;br&gt;&lt;font style='font-size:9px'&gt;POSTGRES_USER / PASSWORD / DB&lt;/font&gt;" style="shape=note;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;size=12;" parent="1" vertex="1">
+                    <mxGeometry x="710" y="35" width="210" height="70" as="geometry"/>
+                </mxCell>
+
+                <!-- ===== NETWORKPOLICY: vote-egress ===== -->
+                <mxCell id="np-vote" value="NetworkPolicy: vote-egress-policy&lt;br&gt;&lt;font style='font-size:9px'&gt;vote egress allowed TO: redis + DNS (port 53) only&lt;/font&gt;" style="rounded=1;dashed=1;strokeColor=#d79b00;strokeWidth=2;fillColor=none;fontSize=10;fontColor=#d79b00;verticalAlign=top;align=center;spacingTop=5;" parent="1" vertex="1">
+                    <mxGeometry x="450" y="200" width="560" height="185" as="geometry"/>
+                </mxCell>
+
+                <!-- ===== NETWORKPOLICY: db-ingress ===== -->
+                <mxCell id="np-db" value="NetworkPolicy: db-ingress-policy&lt;br&gt;&lt;font style='font-size:9px'&gt;db ingress allowed FROM: worker + result only&lt;/font&gt;" style="rounded=1;dashed=1;strokeColor=#FF0000;strokeWidth=2;fillColor=none;fontSize=10;fontColor=#FF0000;verticalAlign=top;align=center;spacingTop=5;" parent="1" vertex="1">
+                    <mxGeometry x="740" y="360" width="580" height="270" as="geometry"/>
+                </mxCell>
+
+                <!-- ===== VOTE POD ===== -->
+                <mxCell id="vote-pod" value="&lt;b&gt;vote pod&lt;/b&gt;&lt;br&gt;ghcr.io/neyamatullah/vote:latest&lt;br&gt;Python/Flask · containerPort 80&lt;br&gt;&lt;font style='font-size:9px'&gt;readiness: httpGet / (5s) | liveness: httpGet / (15s)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="470" y="230" width="210" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="vote-svc" value="Service: vote&lt;br&gt;ClusterIP :80" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="520" y="325" width="110" height="40" as="geometry"/>
+                </mxCell>
+
+                <!-- ===== RESULT POD ===== -->
+                <mxCell id="result-pod" value="&lt;b&gt;result pod&lt;/b&gt;&lt;br&gt;ghcr.io/neyamatullah/result:latest&lt;br&gt;Node.js/Express · containerPort 80&lt;br&gt;&lt;font style='font-size:9px'&gt;readiness: httpGet / (5s) | liveness: httpGet / (15s)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="470" y="620" width="210" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="result-svc" value="Service: result&lt;br&gt;ClusterIP :80" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="520" y="715" width="110" height="40" as="geometry"/>
+                </mxCell>
+
+                <!-- ===== REDIS POD ===== -->
+                <mxCell id="redis-pod" value="&lt;b&gt;redis pod&lt;/b&gt;&lt;br&gt;redis:7-alpine&lt;br&gt;containerPort 6379&lt;br&gt;&lt;font style='font-size:9px'&gt;readiness: tcpSocket :6379 (5s) | liveness (10s)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="770" y="230" width="210" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="redis-svc" value="Service: redis&lt;br&gt;ClusterIP :6379" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="820" y="325" width="110" height="40" as="geometry"/>
+                </mxCell>
+
+                <!-- ===== WORKER POD ===== -->
+                <mxCell id="worker-pod" value="&lt;b&gt;worker pod&lt;/b&gt;&lt;br&gt;ghcr.io/neyamatullah/worker:latest&lt;br&gt;.NET 8 · no containerPort&lt;br&gt;&lt;font style='font-size:9px'&gt;readiness: exec kill -0 1 (15s) | liveness (30s)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="770" y="590" width="210" height="80" as="geometry"/>
+                </mxCell>
+
+                <!-- ===== DB POD ===== -->
+                <mxCell id="db-pod" value="&lt;b&gt;db pod&lt;/b&gt;&lt;br&gt;postgres:15-alpine&lt;br&gt;containerPort 5432&lt;br&gt;&lt;font style='font-size:9px'&gt;readiness: exec pg_isready (10s) | liveness (20s)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="1080" y="400" width="210" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="db-svc" value="Service: db&lt;br&gt;ClusterIP :5432" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="1130" y="495" width="110" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="pvc" value="PVC: postgres-pvc&lt;br&gt;1Gi · ReadWriteOnce&lt;br&gt;/var/lib/postgresql/data" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="1140" y="555" width="140" height="70" as="geometry"/>
+                </mxCell>
+
+                <!-- ===== LEGEND ===== -->
+                <mxCell id="legend" value="Legend" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="150" y="780" width="240" height="130" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg1" value="Pod" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="160" y="815" width="60" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg1b" value="= Presentation (vote/result)" style="text;html=1;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="228" y="815" width="155" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg2" value="Pod" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="160" y="848" width="60" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg2b" value="= Application (redis/worker)" style="text;html=1;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="228" y="848" width="155" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg3" value="Pod" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="160" y="881" width="60" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="leg3b" value="= Data (db)" style="text;html=1;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="228" y="881" width="155" height="25" as="geometry"/>
+                </mxCell>
+
+                <!-- ===== EDGES ===== -->
+
+                <!-- Browser → ingress-nginx -->
+                <mxCell id="e1" value="HTTP :80&lt;br&gt;voting.local" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;fontStyle=2;strokeColor=#6c8ebf;strokeWidth=2;" parent="1" source="browser" target="nginx" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+
+                <!-- ingress-nginx → vote-svc -->
+                <mxCell id="e2" value="path /" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;fontStyle=2;strokeColor=#6c8ebf;" parent="1" source="nginx" target="vote-svc" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+
+                <!-- ingress-nginx → result-svc -->
+                <mxCell id="e3" value="path /result" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;fontStyle=2;strokeColor=#6c8ebf;" parent="1" source="nginx" target="result-svc" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+
+                <!-- vote-svc → vote-pod -->
+                <mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" parent="1" source="vote-svc" target="vote-pod" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+
+                <!-- result-svc → result-pod -->
+                <mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" parent="1" source="result-svc" target="result-pod" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+
+                <!-- vote-pod → redis-svc (ALLOWED) -->
+                <mxCell id="e6" value="RPUSH votes" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;fontStyle=2;strokeColor=#82b366;strokeWidth=2;" parent="1" source="vote-pod" target="redis-svc" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+
+                <!-- vote-pod → db-svc (BLOCKED) -->
+                <mxCell id="e7" value="BLOCKED ✗" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;fontStyle=3;strokeColor=#FF0000;strokeWidth=2;dashed=1;endArrow=block;endFill=0;" parent="1" source="vote-pod" target="db-svc" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="575" y="200"/>
+                            <mxPoint x="1185" y="200"/>
+                            <mxPoint x="1185" y="515"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+
+                <!-- redis-svc → redis-pod -->
+                <mxCell id="e8" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" parent="1" source="redis-svc" target="redis-pod" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+
+                <!-- worker-pod → redis-svc -->
+                <mxCell id="e9" value="BLPOP votes" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;fontStyle=2;strokeColor=#82b366;strokeWidth=2;" parent="1" source="worker-pod" target="redis-svc" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+
+                <!-- worker-pod → db-svc (ALLOWED) -->
+                <mxCell id="e10" value="INSERT / UPDATE" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;fontStyle=2;strokeColor=#b85450;strokeWidth=2;" parent="1" source="worker-pod" target="db-svc" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+
+                <!-- result-pod → db-svc (ALLOWED) -->
+                <mxCell id="e11" value="SELECT every 1s" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;fontStyle=2;strokeColor=#b85450;strokeWidth=2;" parent="1" source="result-pod" target="db-svc" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="575" y="770"/>
+                            <mxPoint x="1185" y="770"/>
+                            <mxPoint x="1185" y="535"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+
+                <!-- db-svc → db-pod -->
+                <mxCell id="e12" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" parent="1" source="db-svc" target="db-pod" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+
+                <!-- db-pod → pvc -->
+                <mxCell id="e13" value="mounts" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;dashed=1;" parent="1" source="db-pod" target="pvc" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+
+                <!-- ConfigMap → vote-pod -->
+                <mxCell id="e14" value="configMapKeyRef" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;dashed=1;strokeColor=#9673a6;" parent="1" source="cm" target="vote-pod" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+
+                <!-- ConfigMap → worker-pod -->
+                <mxCell id="e15" value="configMapKeyRef" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;dashed=1;strokeColor=#9673a6;" parent="1" source="cm" target="worker-pod" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="575" y="130"/>
+                            <mxPoint x="875" y="130"/>
+                            <mxPoint x="875" y="590"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+
+                <!-- Secret → db-pod -->
+                <mxCell id="e16" value="secretKeyRef" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;dashed=1;strokeColor=#d79b00;" parent="1" source="secret" target="db-pod" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1185" y="70"/>
+                            <mxPoint x="1185" y="400"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+
+                <!-- Secret → worker-pod -->
+                <mxCell id="e17" value="secretKeyRef" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;dashed=1;strokeColor=#d79b00;" parent="1" source="secret" target="worker-pod" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="815" y="70"/>
+                            <mxPoint x="815" y="590"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+
+                <!-- Secret → result-pod -->
+                <mxCell id="e18" value="secretKeyRef" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;dashed=1;strokeColor=#d79b00;" parent="1" source="secret" target="result-pod" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="715" y="130"/>
+                            <mxPoint x="575" y="130"/>
+                            <mxPoint x="575" y="620"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>
