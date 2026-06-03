@@ -598,11 +598,51 @@ Pipeline stages: lint → build → scan → push (on `staging` push)
 | Task | Tool |
 |------|------|
 | Dependency auto-updates | **Dependabot** |
-| Static analysis | **CodeQL** (GitHub native) |
-| Rules-based SAST | **Semgrep** |
-| Dependency CVE scan | **OWASP Dependency-Check** |
-| Secret detection in commits | **Gitleaks**, **TruffleHog** |
-| License compliance | **FOSSA** or `trivy --scanners license` |
+| Static analysis (semantic) | **CodeQL** (GitHub native) |
+| Static analysis (pattern) | **Semgrep** |
+| Secret detection in CI | **Gitleaks** (CI job) |
+
+### Definition of Done for Phase 4
+
+- [x] `.github/dependabot.yml` configured for pip, npm, nuget, and GitHub Actions (weekly)
+- [x] `codeql.yml` workflow analyses Python, JS, and C# — triggers on staging push, PRs, and weekly cron
+- [x] CodeQL results surface in GitHub Security → Code scanning tab
+- [x] `semgrep.yml` workflow runs OWASP Top-10 rules — SARIF uploaded to Security tab
+- [x] Gitleaks `secret-scan` job added to `ci.yml` as the first job
+- [x] `build-and-scan` blocked on `secret-scan` passing
+
+### Phase 4 — Actual Results (2026-06-03)
+
+**Files added:**
+
+| File | Purpose |
+|------|---------|
+| `.github/dependabot.yml` | Weekly PRs for pip (`vote/`), npm (`result/`), nuget (`worker/`), and GitHub Actions |
+| `.github/workflows/codeql.yml` | Semantic SAST — Python (`none` build mode), JS (`none`), C# (`autobuild`); `security-and-quality` query suite |
+| `.github/workflows/semgrep.yml` | Pattern SAST — `p/python`, `p/javascript`, `p/owasp-top-ten`; SARIF upload to Security tab |
+
+**CI pipeline change (`ci.yml`):**
+
+Added `secret-scan` as the first job (runs `gitleaks/gitleaks-action@v2` with `fetch-depth: 0` for full history). Updated `build-and-scan.needs` to `[secret-scan, lint-python, lint-js, lint-dotnet]` so a secret finding blocks all downstream work.
+
+Updated pipeline:
+
+```
+secret-scan ─┐
+lint-python  ├─► build-and-scan (matrix: vote/result/worker) ─► push to GHCR
+lint-js      │
+lint-dotnet  ┘
+```
+
+**Trigger design:**
+
+| Workflow | Push trigger | PR trigger | Schedule |
+|----------|-------------|------------|----------|
+| `ci.yml` (Gitleaks + build) | `staging` only | — | — |
+| `codeql.yml` | `staging` | PRs → staging, main | Monday 03:00 UTC |
+| `semgrep.yml` | `staging` | PRs → staging, main | — |
+
+**Branch/PRs:** `feature/phase4-sast-dependency-scanning` → PR #23 → `dev`; promoted via PRs #24/#25 → `staging` → `main`
 
 ---
 
