@@ -13,6 +13,7 @@ Each entry is a real question asked during implementation, answered in context.
 - [Is Ingress a tool for Kubernetes?](#is-ingress-a-tool-for-kubernetes)
 - [Why did NetworkPolicy not block traffic in Minikube?](#why-did-networkpolicy-not-block-traffic-in-minikube)
 - [Why did the worker probe fail with "pgrep not found"?](#why-did-the-worker-probe-fail-with-pgrep-not-found)
+- [How do system design tiers map to Docker networks and Kubernetes?](#how-do-system-design-tiers-map-to-docker-networks-and-kubernetes)
 
 ---
 
@@ -285,5 +286,68 @@ readinessProbe:
 | Redis, PostgreSQL (TCP server) | `tcpSocket` on the service port |
 | PostgreSQL (more precise) | `exec: pg_isready -U postgres` |
 | Minimal runtime (no shell tools) | `exec: /bin/sh -c "kill -0 1"` |
+
+---
+
+## How do system design tiers map to Docker networks and Kubernetes?
+
+The tier boundary concept is identical across all three layers. Only the enforcement mechanism changes.
+
+```
+System Design Tier  →  Docker Network  →  Kubernetes Equivalent
+─────────────────────────────────────────────────────────────────
+Presentation Tier   →  frontend        →  Ingress + ingress-nginx (controlled external entry)
+Application Tier    →  backend         →  NetworkPolicy (vote-egress-policy)
+Data Tier           →  data            →  NetworkPolicy (db-ingress-policy)
+```
+
+### How each layer enforces isolation
+
+**System Design** — a logical boundary on paper. "The web tier should not talk directly to the database." Not enforced by any technology yet.
+
+**Docker Compose** — enforced by named networks. A container can only reach another if they share a network. `vote` has no path to `db` because they share no common network.
+
+```yaml
+vote:  networks: [frontend, backend]   # no data network → cannot reach db
+db:    networks: [data]                # isolated to data tier only
+```
+
+**Kubernetes** — enforced by NetworkPolicy (requires Calico or Cilium CNI). Instead of network membership, rules are written based on pod labels:
+
+```yaml
+# db only accepts ingress from worker and result — vote implicitly denied
+podSelector: app=db
+ingress from: app=worker OR app=result
+```
+
+### The key difference in default behaviour
+
+| Model | Default | You write rules to... |
+|-------|---------|----------------------|
+| Docker networks | Isolated unless joined | Allow traffic (by joining a network) |
+| K8s NetworkPolicy | Open — all pods talk freely | Restrict traffic (by writing policies) |
+
+Docker is **opt-in** (join a network to gain access). Kubernetes is **opt-out** (all open by default; policies add restrictions).
+
+### This project — the full translation
+
+| Phase 2 Docker Network | Members | K8s equivalent |
+|------------------------|---------|----------------|
+| `frontend` (not internal) | vote, result | Ingress resource + ingress-nginx |
+| `backend` (internal) | vote, result, worker, redis | `vote-egress-policy` (vote → redis only) |
+| `data` (internal) | result, worker, db | `db-ingress-policy` (db ← worker + result only) |
+
+### Complete mental model
+
+```
+Concept           Docker Compose          Kubernetes
+────────────────────────────────────────────────────
+Tier boundary     Named network           NetworkPolicy
+External access   ports: exposed          Ingress + Service
+Internal DNS      service name            Service (ClusterIP)
+No direct access  not in same network     not in policy allowlist
+```
+
+The tier boundaries never change across the stack — only the tool that enforces them does.
 
 ---
