@@ -598,35 +598,521 @@ Pipeline stages: lint → build → scan → push (on `staging` push)
 | Task | Tool |
 |------|------|
 | Dependency auto-updates | **Dependabot** |
-| Static analysis | **CodeQL** (GitHub native) |
-| Rules-based SAST | **Semgrep** |
-| Dependency CVE scan | **OWASP Dependency-Check** |
-| Secret detection in commits | **Gitleaks**, **TruffleHog** |
-| License compliance | **FOSSA** or `trivy --scanners license` |
+| Static analysis (semantic) | **CodeQL** (GitHub native) |
+| Static analysis (pattern) | **Semgrep** |
+| Secret detection in CI | **Gitleaks** (CI job) |
+
+### Definition of Done for Phase 4
+
+- [x] `.github/dependabot.yml` configured for pip, npm, nuget, and GitHub Actions (weekly)
+- [x] `codeql.yml` workflow analyses Python, JS, and C# — triggers on staging push, PRs, and weekly cron
+- [x] CodeQL results surface in GitHub Security → Code scanning tab
+- [x] `semgrep.yml` workflow runs OWASP Top-10 rules — SARIF uploaded to Security tab
+- [x] Gitleaks `secret-scan` job added to `ci.yml` as the first job
+- [x] `build-and-scan` blocked on `secret-scan` passing
+
+### Phase 4 — Actual Results (2026-06-03)
+
+**Files added:**
+
+| File | Purpose |
+|------|---------|
+| `.github/dependabot.yml` | Weekly PRs for pip (`vote/`), npm (`result/`), nuget (`worker/`), and GitHub Actions |
+| `.github/workflows/codeql.yml` | Semantic SAST — Python (`none` build mode), JS (`none`), C# (`autobuild`); `security-and-quality` query suite |
+| `.github/workflows/semgrep.yml` | Pattern SAST — `p/python`, `p/javascript`, `p/owasp-top-ten`; SARIF upload to Security tab |
+
+**CI pipeline change (`ci.yml`):**
+
+Added `secret-scan` as the first job (runs `gitleaks/gitleaks-action@v2` with `fetch-depth: 0` for full history). Updated `build-and-scan.needs` to `[secret-scan, lint-python, lint-js, lint-dotnet]` so a secret finding blocks all downstream work.
+
+Updated pipeline:
+
+```
+secret-scan ─┐
+lint-python  ├─► build-and-scan (matrix: vote/result/worker) ─► push to GHCR
+lint-js      │
+lint-dotnet  ┘
+```
+
+**Trigger design:**
+
+| Workflow | Push trigger | PR trigger | Schedule |
+|----------|-------------|------------|----------|
+| `ci.yml` (Gitleaks + build) | `staging` only | — | — |
+| `codeql.yml` | `staging` | PRs → staging, main | Monday 03:00 UTC |
+| `semgrep.yml` | `staging` | PRs → staging, main | — |
+
+**Branch/PRs:** `feature/phase4-sast-dependency-scanning` → PR #23 → `dev`; promoted via PRs #24/#25 → `staging` → `main`
 
 ---
 
 ## Phase 5 — Kubernetes Migration
 
-**Goal:** Move from Docker Compose to a production-grade K8s setup.
+**Goal:** Move from Docker Compose to a production-grade K8s setup that can scale, self-heal, and run anywhere.
 
 | Task | Tool |
 |------|------|
-| Local K8s cluster | **Minikube** or **kind** |
+| Local K8s cluster | **Minikube** |
 | CLI management | **kubectl** |
-| Compose → K8s conversion | **Kompose** (starting point) |
-| Manifest linting | **kube-linter**, **kubeval** |
-| Packaging | **Helm** |
+| Manifest linting | **kube-linter** |
+| Health probes | Native K8s `readinessProbe` / `livenessProbe` |
 | Ingress | **ingress-nginx** |
-| Network policies | Native K8s `NetworkPolicy` + **Calico** |
-| Cluster UI | **Lens** (desktop) or **k9s** (terminal) |
+| Network policies | Native K8s `NetworkPolicy` |
+| Packaging | **Helm** |
+| Cluster terminal UI | **k9s** |
 
-Migration order:
-1. Raw manifests: `Deployment`, `Service`, `ConfigMap`, `Secret`
-2. Add `readinessProbe` + `livenessProbe` to each pod
-3. Add `Ingress` to route `/` → vote, `/result` → result
-4. Apply `NetworkPolicy` to replicate front/back-tier isolation
-5. Package as a Helm chart
+---
+
+### Kubernetes vocabulary — Docker Compose mapping
+
+Before writing any YAML, map what you already know to the Kubernetes equivalent:
+
+| Docker Compose | Kubernetes | Purpose |
+|---------------|------------|---------|
+| `service:` block | `Deployment` + `Service` | Runs the container and exposes it internally |
+| `image:` | Pod spec `image:` | Same |
+| `environment:` (non-secret) | `ConfigMap` | Config injection |
+| `environment:` (passwords) | `Secret` | Credential injection |
+| `ports:` | `Service` (ClusterIP) + `Ingress` | Network exposure |
+| `networks:` | `NetworkPolicy` | Traffic control |
+| `depends_on: condition: healthy` | `readinessProbe` | Wait until pod is ready |
+| `healthcheck:` | `livenessProbe` | Restart unresponsive pod |
+| `volumes:` (persistent) | `PersistentVolumeClaim` | Persistent storage |
+| `deploy.resources.limits:` | `resources.limits:` in pod spec | CPU / memory caps |
+
+---
+
+### Step 1 — Spin up a local cluster (Minikube)
+
+```bash
+minikube start --driver=docker
+minikube addons enable ingress   # needed for Step 5
+kubectl get nodes                # should show 1 node Ready
+```
+
+Install k9s for a terminal UI:
+```bash
+# macOS / Linux
+brew install k9s
+# or download binary from https://github.com/derailed/k9s/releases
+k9s
+```
+
+---
+
+### Step 2 — Write raw manifests (one service at a time)
+
+Work from the bottom of the dependency chain upward:
+
+```
+db → redis → worker → vote → result
+```
+
+**File layout:**
+
+```
+k8s/
+  configmap.yaml        # OPTION_A, OPTION_B, hostnames
+  secret.yaml           # POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+  db/
+    pvc.yaml
+    deployment.yaml
+    service.yaml
+  redis/
+    deployment.yaml
+    service.yaml
+  worker/
+    deployment.yaml
+  vote/
+    deployment.yaml
+    service.yaml
+  result/
+    deployment.yaml
+    service.yaml
+  ingress.yaml
+  networkpolicy.yaml
+```
+
+**ConfigMap** (non-secret config):
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  OPTION_A: "Cats"
+  OPTION_B: "Dogs"
+  REDIS_HOST: "redis"
+  DB_HOST: "db"
+```
+
+**Secret** (credentials):
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+type: Opaque
+stringData:
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_DB: postgres
+```
+
+**PVC for PostgreSQL** (db only — stateful):
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+```
+
+**Deployment template** (vote example):
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vote
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vote
+  template:
+    metadata:
+      labels:
+        app: vote
+    spec:
+      containers:
+        - name: vote
+          image: ghcr.io/neyamatullah/vote:latest
+          ports:
+            - containerPort: 80
+          env:
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: REDIS_HOST
+            - name: OPTION_A
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: OPTION_A
+            - name: OPTION_B
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: OPTION_B
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "128Mi"
+            requests:
+              cpu: "100m"
+              memory: "64Mi"
+```
+
+**Service template** (ClusterIP — internal only):
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: vote
+spec:
+  selector:
+    app: vote
+  ports:
+    - port: 80
+      targetPort: 80
+```
+
+Apply and verify each service before moving to the next:
+```bash
+kubectl apply -f k8s/db/
+kubectl get pods -w          # wait for Running
+kubectl apply -f k8s/redis/
+kubectl apply -f k8s/worker/
+kubectl apply -f k8s/vote/
+kubectl apply -f k8s/result/
+```
+
+---
+
+### Step 3 — Add health probes to all five services
+
+Without probes, Kubernetes sends traffic to pods the instant they start — before the app is ready. Worker crashes trying to reach a db that has not finished initialising.
+
+**Three probe types by service:**
+
+| Service | Probe type | Command / path |
+|---------|-----------|----------------|
+| vote | `httpGet` | `GET /` on port 80 |
+| result | `httpGet` | `GET /` on port 80 |
+| redis | `tcpSocket` | port 6379 |
+| db | `exec` | `pg_isready -U postgres` |
+| worker | `exec` | check process alive (no HTTP port) |
+
+**HTTP probe** (vote / result):
+```yaml
+readinessProbe:
+  httpGet:
+    path: /
+    port: 80
+  initialDelaySeconds: 5
+  periodSeconds: 10
+livenessProbe:
+  httpGet:
+    path: /
+    port: 80
+  initialDelaySeconds: 15
+  periodSeconds: 20
+```
+
+**TCP probe** (redis):
+```yaml
+readinessProbe:
+  tcpSocket:
+    port: 6379
+  initialDelaySeconds: 5
+  periodSeconds: 10
+livenessProbe:
+  tcpSocket:
+    port: 6379
+  initialDelaySeconds: 10
+  periodSeconds: 15
+```
+
+**Exec probe** (db):
+```yaml
+readinessProbe:
+  exec:
+    command: ["pg_isready", "-U", "postgres"]
+  initialDelaySeconds: 10
+  periodSeconds: 5
+livenessProbe:
+  exec:
+    command: ["pg_isready", "-U", "postgres"]
+  initialDelaySeconds: 20
+  periodSeconds: 10
+```
+
+---
+
+### Step 4 — Add Ingress
+
+In Docker Compose, ports were mapped directly (`8080:80`). In Kubernetes the correct pattern is:
+
+```
+Browser → Ingress (nginx) → Service (ClusterIP) → Pod
+```
+
+Minikube addon was enabled in Step 1. Write the Ingress resource:
+
+```yaml
+# k8s/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: voting-app
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: voting.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vote
+                port:
+                  number: 80
+          - path: /result
+            pathType: Prefix
+            backend:
+              service:
+                name: result
+                port:
+                  number: 80
+```
+
+Add the hostname to `/etc/hosts`:
+```bash
+echo "$(minikube ip) voting.local" | sudo tee -a /etc/hosts
+```
+
+Test:
+```bash
+curl http://voting.local        # vote UI
+curl http://voting.local/result # result UI
+```
+
+---
+
+### Step 5 — Apply NetworkPolicy
+
+Replicates the Phase 2 Docker network isolation in Kubernetes. The same rule applies: **vote must not be able to reach db**.
+
+Default Kubernetes allows all pod-to-pod traffic. NetworkPolicy adds a firewall:
+
+```yaml
+# k8s/networkpolicy.yaml
+# Allow db ingress only from worker and result — vote is implicitly denied
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: db-ingress-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: db
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: worker
+        - podSelector:
+            matchLabels:
+              app: result
+---
+# Deny all egress from vote except to redis
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vote-egress-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: vote
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+    - ports:
+        - port: 53          # allow DNS resolution
+          protocol: UDP
+```
+
+Verify isolation:
+```bash
+# vote should NOT reach db
+kubectl exec deploy/vote -- nc -zv db 5432
+# Expected: connection refused / timed out
+
+# vote SHOULD reach redis
+kubectl exec deploy/vote -- nc -zv redis 6379
+# Expected: open
+```
+
+---
+
+### Step 6 — Package as a Helm chart
+
+Helm turns your collection of YAML files into a parameterised, versioned, installable package.
+
+**Initialise chart:**
+```bash
+helm create helm/voting-app
+# then replace the generated templates with your k8s/ manifests
+```
+
+**Chart structure:**
+```
+helm/voting-app/
+  Chart.yaml
+  values.yaml
+  templates/
+    configmap.yaml
+    secret.yaml
+    db/deployment.yaml
+    db/service.yaml
+    db/pvc.yaml
+    redis/deployment.yaml
+    redis/service.yaml
+    worker/deployment.yaml
+    vote/deployment.yaml
+    vote/service.yaml
+    result/deployment.yaml
+    result/service.yaml
+    ingress.yaml
+    networkpolicy.yaml
+```
+
+**`values.yaml`** — all tuneable defaults in one place:
+```yaml
+vote:
+  image: ghcr.io/neyamatullah/vote
+  tag: latest
+  replicas: 1
+  optionA: Cats
+  optionB: Dogs
+
+result:
+  image: ghcr.io/neyamatullah/result
+  tag: latest
+  replicas: 1
+
+worker:
+  image: ghcr.io/neyamatullah/worker
+  tag: latest
+
+db:
+  image: postgres
+  tag: "15-alpine"
+  user: postgres
+  password: postgres
+  name: postgres
+
+redis:
+  image: redis
+  tag: "7-alpine"
+
+ingress:
+  host: voting.local
+```
+
+Templates use `{{ .Values.vote.optionA }}` to inject values, so the same chart deploys to dev, staging, and production with different `values.yaml` overrides.
+
+**Install and upgrade:**
+```bash
+helm install voting-app ./helm/voting-app
+helm upgrade voting-app ./helm/voting-app --set vote.optionA=Tea --set vote.optionB=Coffee
+helm uninstall voting-app
+```
+
+**Lint before every PR:**
+```bash
+helm lint ./helm/voting-app
+```
+
+---
+
+### Definition of Done for Phase 5
+
+- [ ] Minikube cluster running locally
+- [ ] All 5 services deployed as Deployments with ClusterIP Services
+- [ ] ConfigMap and Secret used — no hardcoded values in manifests
+- [ ] PVC provisioned for PostgreSQL; data survives pod restart
+- [ ] All 5 pods show `Running` and `READY 1/1`
+- [ ] readinessProbe and livenessProbe on every pod
+- [ ] Ingress routes `voting.local/` → vote and `voting.local/result` → result
+- [ ] NetworkPolicy blocks vote → db (verified by exec test)
+- [ ] NetworkPolicy allows vote → redis (verified by exec test)
+- [ ] Full stack functional end-to-end (vote, see result update)
+- [ ] Helm chart installs and upgrades cleanly (`helm lint` passes)
 
 ---
 

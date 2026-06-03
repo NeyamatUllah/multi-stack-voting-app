@@ -180,7 +180,6 @@ In production (Phase 8, Azure/AWS/GCP), the control plane is managed for you (AK
 You describe the **desired state**. The cluster continuously reconciles reality to match it.
 
 ---
-
 ## Is Ingress a tool for Kubernetes?
 
 Ingress is a **native Kubernetes resource**, not a third-party tool. But it has two parts that are easy to confuse:
