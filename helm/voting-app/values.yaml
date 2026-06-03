@@ -1,0 +1,77 @@
+vote:
+  image:
+    repository: ghcr.io/neyamatullah/vote
+    tag: latest
+  replicas: 1
+  options:
+    a: Cats
+    b: Dogs
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 100m
+      memory: 64Mi
+
+result:
+  image:
+    repository: ghcr.io/neyamatullah/result
+    tag: latest
+  replicas: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 100m
+      memory: 64Mi
+
+worker:
+  image:
+    repository: ghcr.io/neyamatullah/worker
+    tag: latest
+  replicas: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+redis:
+  image:
+    repository: redis
+    tag: "7-alpine"
+  resources:
+    limits:
+      cpu: 250m
+      memory: 64Mi
+    requests:
+      cpu: 50m
+      memory: 32Mi
+
+db:
+  image:
+    repository: postgres
+    tag: "15-alpine"
+  storage: 1Gi
+  credentials:
+    user: postgres
+    password: postgres
+    name: postgres
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+ingress:
+  host: voting.local
+  className: nginx
+
+networkPolicy:
+  enabled: true
