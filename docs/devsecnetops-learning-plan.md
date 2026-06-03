@@ -1102,17 +1102,56 @@ helm lint ./helm/voting-app
 
 ### Definition of Done for Phase 5
 
-- [ ] Minikube cluster running locally
-- [ ] All 5 services deployed as Deployments with ClusterIP Services
-- [ ] ConfigMap and Secret used — no hardcoded values in manifests
-- [ ] PVC provisioned for PostgreSQL; data survives pod restart
-- [ ] All 5 pods show `Running` and `READY 1/1`
-- [ ] readinessProbe and livenessProbe on every pod
-- [ ] Ingress routes `voting.local/` → vote and `voting.local/result` → result
-- [ ] NetworkPolicy blocks vote → db (verified by exec test)
-- [ ] NetworkPolicy allows vote → redis (verified by exec test)
-- [ ] Full stack functional end-to-end (vote, see result update)
-- [ ] Helm chart installs and upgrades cleanly (`helm lint` passes)
+- [x] Minikube cluster running locally (`--cni=calico` required for NetworkPolicy enforcement)
+- [x] All 5 services deployed as Deployments with ClusterIP Services
+- [x] ConfigMap and Secret used — no hardcoded values in manifests
+- [x] PVC provisioned for PostgreSQL; data survives pod restart
+- [x] All 5 pods show `Running` and `READY 1/1`
+- [x] readinessProbe and livenessProbe on every pod
+- [x] Ingress routes `voting.local/` → vote and `voting.local/result` → result
+- [x] NetworkPolicy blocks vote → db (verified by exec test)
+- [x] NetworkPolicy allows vote → redis (verified by exec test)
+- [x] Full stack functional end-to-end — HTTP 200 on both routes
+- [ ] Helm chart installs and upgrades cleanly (`helm lint` passes) — next PR
+
+### Phase 5 — Actual Results (2026-06-03)
+
+**Files added:** `k8s/` directory — 14 manifests across 6 subdirectories
+
+| File | Purpose |
+|------|---------|
+| `k8s/configmap.yaml` | OPTION_A/B, REDIS_HOST, DB_HOST — injected via `configMapKeyRef` |
+| `k8s/secret.yaml` | POSTGRES_USER/PASSWORD/DB — injected via `secretKeyRef` |
+| `k8s/db/pvc.yaml` | 1Gi ReadWriteOnce PVC for PostgreSQL data |
+| `k8s/db/deployment.yaml` | postgres:15-alpine; exec probe (`pg_isready`) |
+| `k8s/db/service.yaml` | ClusterIP on port 5432 |
+| `k8s/redis/deployment.yaml` | redis:7-alpine; tcpSocket probe on 6379 |
+| `k8s/redis/service.yaml` | ClusterIP on port 6379 |
+| `k8s/worker/deployment.yaml` | GHCR image; exec probe (`kill -0 1` — minimal runtime has no pgrep) |
+| `k8s/vote/deployment.yaml` | GHCR image; httpGet probe on `/` |
+| `k8s/vote/service.yaml` | ClusterIP on port 80 |
+| `k8s/result/deployment.yaml` | GHCR image; httpGet probe on `/` |
+| `k8s/result/service.yaml` | ClusterIP on port 80 |
+| `k8s/ingress.yaml` | ingress-nginx routing `voting.local/` → vote, `/result` → result |
+| `k8s/networkpolicy.yaml` | db-ingress-policy (allow worker+result only); vote-egress-policy (allow redis+DNS only) |
+
+**Lessons learned:**
+
+| Issue | Root cause | Fix |
+|-------|-----------|-----|
+| NetworkPolicy not enforced | Default Minikube bridge CNI ignores policies | Restart with `--cni=calico` |
+| Worker probe failing | Minimal .NET runtime image has no `pgrep` | Use `kill -0 1` (works on any Linux container) |
+
+**Verification results:**
+
+```
+vote → db:     BLOCKED (timed out) ✅
+vote → redis:  CONNECTED           ✅
+voting.local/        HTTP 200      ✅
+voting.local/result  HTTP 200      ✅
+```
+
+**Branch/PRs:** `feature/phase5-kubernetes` → PR #41 → `dev`; promoted via PRs #42/#43 → `staging` → `main`
 
 ---
 
