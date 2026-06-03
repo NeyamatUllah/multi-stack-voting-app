@@ -11,6 +11,8 @@ Each entry is a real question asked during implementation, answered in context.
 - [What is SAST?](#what-is-sast)
 - [What is a Kubernetes cluster?](#what-is-a-kubernetes-cluster)
 - [Is Ingress a tool for Kubernetes?](#is-ingress-a-tool-for-kubernetes)
+- [Why did NetworkPolicy not block traffic in Minikube?](#why-did-networkpolicy-not-block-traffic-in-minikube)
+- [Why did the worker probe fail with "pgrep not found"?](#why-did-the-worker-probe-fail-with-pgrep-not-found)
 
 ---
 
@@ -218,5 +220,70 @@ Browser → ingress-nginx pod (controller) → reads Ingress rules → routes to
 | NodePort | Exposes a random high port (e.g. 32456) — not clean for HTTP |
 | LoadBalancer | Provisions a cloud load balancer per Service — expensive and wasteful for multiple services |
 | **Ingress** | One entry point, routes to many services by path/host — the correct production pattern |
+
+---
+
+## Why did NetworkPolicy not block traffic in Minikube?
+
+After applying a NetworkPolicy that should have blocked `vote → db`, the connection still went through. The root cause was the **CNI plugin**.
+
+### What is a CNI plugin?
+
+CNI (Container Network Interface) is the component responsible for pod networking in Kubernetes. Different CNI plugins have different capabilities:
+
+| CNI | NetworkPolicy enforcement |
+|-----|--------------------------|
+| bridge (Minikube default) | ❌ No — policies are accepted but silently ignored |
+| Flannel | ❌ No |
+| **Calico** | ✅ Yes |
+| **Cilium** | ✅ Yes |
+
+Kubernetes accepts and stores NetworkPolicy objects regardless of CNI — it never warns you that they won't be enforced. You only discover the problem when you test.
+
+### Fix
+
+Restart Minikube with Calico as the CNI:
+
+```bash
+minikube delete
+minikube start --driver=docker --cni=calico
+```
+
+### Rule of thumb
+
+Always use `--cni=calico` (or Cilium) in Minikube whenever you need NetworkPolicy enforcement. The default bridge CNI is fine for learning basic K8s but cannot enforce network isolation.
+
+---
+
+## Why did the worker probe fail with "pgrep not found"?
+
+The worker `readinessProbe` and `livenessProbe` were configured to run `pgrep -f worker` to check if the .NET process was alive. The pod entered a crash loop with:
+
+```
+exec: "pgrep": executable file not found in $PATH
+```
+
+### Root cause
+
+The worker runs on `mcr.microsoft.com/dotnet/runtime:8.0` — a minimal Debian image stripped of non-essential tools. `pgrep` is part of the `procps` package, which is not installed.
+
+### Fix
+
+Use `kill -0 1` instead — it sends signal 0 to PID 1, which checks whether the process exists without actually killing it. Signal 0 is available on every Linux system with no extra tools required:
+
+```yaml
+readinessProbe:
+  exec:
+    command: ["/bin/sh", "-c", "kill -0 1"]
+```
+
+### When to use which probe command
+
+| Container type | Recommended probe |
+|---------------|------------------|
+| Flask / Express (HTTP server) | `httpGet` on the app port |
+| Redis, PostgreSQL (TCP server) | `tcpSocket` on the service port |
+| PostgreSQL (more precise) | `exec: pg_isready -U postgres` |
+| Minimal runtime (no shell tools) | `exec: /bin/sh -c "kill -0 1"` |
 
 ---
