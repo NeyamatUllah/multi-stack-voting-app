@@ -1112,7 +1112,7 @@ helm lint ./helm/voting-app
 - [x] NetworkPolicy blocks vote → db (verified by exec test)
 - [x] NetworkPolicy allows vote → redis (verified by exec test)
 - [x] Full stack functional end-to-end — HTTP 200 on both routes
-- [ ] Helm chart installs and upgrades cleanly (`helm lint` passes) — next PR
+- [x] Helm chart installs and upgrades cleanly (`helm lint` passes, install/upgrade/rollback verified)
 
 ### Phase 5 — Actual Results (2026-06-03)
 
@@ -1152,6 +1152,33 @@ voting.local/result  HTTP 200      ✅
 ```
 
 **Branch/PRs:** `feature/phase5-kubernetes` → PR #41 → `dev`; promoted via PRs #42/#43 → `staging` → `main`
+
+### Helm Chart Results (2026-06-03)
+
+**Files added:** `helm/voting-app/` — 17 files
+
+| File | Purpose |
+|------|---------|
+| `Chart.yaml` | Chart name `voting-app`, version `0.1.0` |
+| `values.yaml` | All tuneable defaults — images, replicas, resources, ballot options, ingress host, networkPolicy toggle |
+| `templates/_helpers.tpl` | Common labels helper (`voting-app.labels`) injected into every resource |
+| `templates/configmap.yaml` | `OPTION_A/B` from `vote.options.a/b`; hostnames hardcoded (stable internal DNS) |
+| `templates/secret.yaml` | Credentials from `db.credentials.*` |
+| `templates/db-pvc.yaml` | Storage size from `db.storage` |
+| `templates/*-deployment.yaml` | Images, replicas, resources all from `values.yaml` |
+| `templates/ingress.yaml` | Host and className from `ingress.*` |
+| `templates/networkpolicy.yaml` | Wrapped in `{{- if .Values.networkPolicy.enabled }}` — can disable for non-Calico clusters |
+
+**Verified operations:**
+
+| Operation | Result |
+|-----------|--------|
+| `helm lint` | 0 failures |
+| `helm install voting-app ./helm/voting-app` | STATUS: deployed, all 5 pods `READY 1/1` |
+| `helm upgrade --set vote.options.a=Tea --set vote.options.b=Coffee` | ConfigMap updated, rollout succeeded |
+| `helm rollback voting-app 1` | Cats vs Dogs restored |
+
+**Branch/PRs:** `feature/phase5-helm` → PR #46 → `dev`; promoted via PRs #47/#48 → `staging` → `main`
 
 ---
 
