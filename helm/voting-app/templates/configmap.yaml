@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  labels:
+    {{- include "voting-app.labels" . | nindent 4 }}
+data:
+  OPTION_A: {{ .Values.vote.options.a | quote }}
+  OPTION_B: {{ .Values.vote.options.b | quote }}
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  DB_HOST: "db"
+  DB_NAME: {{ .Values.db.credentials.name | quote }}
