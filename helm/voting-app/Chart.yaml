@@ -1,0 +1,6 @@
+apiVersion: v2
+name: voting-app
+description: Multi-stack voting application — Python/Flask, .NET 8, Node.js, Redis, PostgreSQL
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
