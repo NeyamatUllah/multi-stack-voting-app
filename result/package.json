@@ -12,7 +12,7 @@
   "dependencies": {
     "async": "^3.2.6",
     "cookie-parser": "^1.4.7",
-    "express": "^4.21.2",
+    "express": "^5.2.1",
     "method-override": "^3.0.0",
     "pg": "^8.13.3",
     "prom-client": "^15.1.3",
