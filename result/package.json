@@ -27,6 +27,6 @@
     "socket.io-parser": "^4.2.6"
   },
   "devDependencies": {
-    "eslint": "^8.57.1"
+    "eslint": "^10.4.1"
   }
 }
