@@ -17,12 +17,7 @@ grafana:
     dashboards:
       enabled: true
       searchNamespace: monitoring
-  additionalDataSources:
-    - name: Loki
-      type: loki
-      url: http://loki-stack:3100
-      access: proxy
-      isDefault: false
+  additionalDataSources: []
 
 alertmanager:
   config:
