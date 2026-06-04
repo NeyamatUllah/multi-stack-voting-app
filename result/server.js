@@ -2,12 +2,20 @@ var express = require('express'),
     async = require('async'),
     cookieParser = require('cookie-parser'),
     path = require('path'),
+    promClient = require('prom-client'),
     app = express(),
     server = require('http').Server(app),
     // IMPORTANT: Socket.IO path is /result/socket.io
     io = require('socket.io')(server, { path: '/result/socket.io' });
 
 var port = process.env.PORT || 4000;
+
+promClient.collectDefaultMetrics({ labels: { app: 'result' } });
+
+app.get('/metrics', async (req, res) => {
+  res.set('Content-Type', promClient.register.contentType);
+  res.end(await promClient.register.metrics());
+});
 
 // Create two namespaces: root ("/") and "/result"
 var rootNamespace = io.of('/');      // Default namespace for pages at "/"
