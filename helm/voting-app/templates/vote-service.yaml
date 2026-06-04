@@ -3,6 +3,7 @@ kind: Service
 metadata:
   name: vote
   labels:
+    app: vote
     {{- include "voting-app.labels" . | nindent 4 }}
 spec:
   selector:

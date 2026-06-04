@@ -1112,7 +1112,7 @@ helm lint ./helm/voting-app
 - [x] NetworkPolicy blocks vote → db (verified by exec test)
 - [x] NetworkPolicy allows vote → redis (verified by exec test)
 - [x] Full stack functional end-to-end — HTTP 200 on both routes
-- [ ] Helm chart installs and upgrades cleanly (`helm lint` passes) — next PR
+- [x] Helm chart installs and upgrades cleanly (`helm lint` passes, install/upgrade/rollback verified)
 
 ### Phase 5 — Actual Results (2026-06-03)
 
@@ -1152,6 +1152,33 @@ voting.local/result  HTTP 200      ✅
 ```
 
 **Branch/PRs:** `feature/phase5-kubernetes` → PR #41 → `dev`; promoted via PRs #42/#43 → `staging` → `main`
+
+### Helm Chart Results (2026-06-03)
+
+**Files added:** `helm/voting-app/` — 17 files
+
+| File | Purpose |
+|------|---------|
+| `Chart.yaml` | Chart name `voting-app`, version `0.1.0` |
+| `values.yaml` | All tuneable defaults — images, replicas, resources, ballot options, ingress host, networkPolicy toggle |
+| `templates/_helpers.tpl` | Common labels helper (`voting-app.labels`) injected into every resource |
+| `templates/configmap.yaml` | `OPTION_A/B` from `vote.options.a/b`; hostnames hardcoded (stable internal DNS) |
+| `templates/secret.yaml` | Credentials from `db.credentials.*` |
+| `templates/db-pvc.yaml` | Storage size from `db.storage` |
+| `templates/*-deployment.yaml` | Images, replicas, resources all from `values.yaml` |
+| `templates/ingress.yaml` | Host and className from `ingress.*` |
+| `templates/networkpolicy.yaml` | Wrapped in `{{- if .Values.networkPolicy.enabled }}` — can disable for non-Calico clusters |
+
+**Verified operations:**
+
+| Operation | Result |
+|-----------|--------|
+| `helm lint` | 0 failures |
+| `helm install voting-app ./helm/voting-app` | STATUS: deployed, all 5 pods `READY 1/1` |
+| `helm upgrade --set vote.options.a=Tea --set vote.options.b=Coffee` | ConfigMap updated, rollout succeeded |
+| `helm rollback voting-app 1` | Cats vs Dogs restored |
+
+**Branch/PRs:** `feature/phase5-helm` → PR #46 → `dev`; promoted via PRs #47/#48 → `staging` → `main`
 
 ---
 
@@ -1303,13 +1330,95 @@ open http://localhost:9093
 
 ### Definition of Done
 
-- [ ] `kube-prometheus-stack` installed — Prometheus, Grafana, Alertmanager all running in `monitoring` ns
-- [ ] `loki-stack` installed — Loki + Promtail DaemonSet running
-- [ ] Prometheus Targets page shows vote and result as UP (green)
-- [ ] Grafana accessible — all 4 custom dashboards visible with live data
-- [ ] Loki datasource connected — pod logs searchable in Grafana Explore
-- [ ] All 4 PrometheusRule alerts present in Alertmanager UI
-- [ ] `helm upgrade voting-app` with named ports — no regressions
+- [x] `kube-prometheus-stack` installed — Prometheus, Grafana, Alertmanager all running in `monitoring` ns
+- [x] `loki-stack` installed — Loki + Promtail DaemonSet running
+- [x] Prometheus Targets page shows vote and result as UP (green)
+- [x] Grafana accessible — all 4 custom dashboards visible with live data
+- [x] Loki datasource connected — pod logs searchable in Grafana Explore
+- [x] All 4 PrometheusRule alerts present in Alertmanager UI
+- [x] `helm upgrade voting-app` with named ports — no regressions
+
+### Phase 6 — Actual Results (2026-06-04)
+
+**Files added:** `monitoring/` directory — 10 files across 2 levels
+
+| File | Purpose |
+|------|---------|
+| `monitoring/kube-prometheus-stack-values.yaml` | Prometheus (7d retention), Grafana (ingress at `grafana.local`, Loki datasource), Alertmanager (log receiver), node-exporter, kube-state-metrics |
+| `monitoring/loki-stack-values.yaml` | Loki single-binary storage + Promtail DaemonSet; Grafana disabled (already provided by kube-prometheus-stack) |
+| `monitoring/servicemonitors.yaml` | `ServiceMonitor` CRDs for vote and result — scrape `/metrics` every 15 s via named port `http` |
+| `monitoring/alerting-rules.yaml` | `PrometheusRule` CRD with 4 alerts: WorkerDown, VoteHighErrorRate, RedisQueueBacklog, DBConnectionsHigh |
+| `monitoring/redis-exporter.yaml` | `oliver006/redis_exporter` Deployment + Service + ServiceMonitor in `monitoring` ns — exposes `redis_list_length` metric |
+| `monitoring/dashboards/vote-throughput.yaml` | ConfigMap: requests/sec by status, error rate, latency p50/p95 |
+| `monitoring/dashboards/queue-depth.yaml` | ConfigMap: Redis list depth, vote POST rate, connected clients, memory used |
+| `monitoring/dashboards/worker-latency.yaml` | ConfigMap: worker pod restarts, ready status, result Node.js heap + active requests |
+| `monitoring/dashboards/cluster-overview.yaml` | ConfigMap: CPU and memory per pod, restart count bar gauge, ready replicas per deployment |
+
+**Files modified:**
+
+| File | Change |
+|------|--------|
+| `vote/app.py` | `PrometheusMetrics(app)` — auto-instruments all Flask routes; exposes `/metrics` |
+| `vote/requirements.txt` | Added `prometheus-flask-exporter==0.23.1` |
+| `result/server.js` | `prom-client` default metrics + `/metrics` endpoint |
+| `result/package.json` | Added `prom-client@^15.1.3` |
+| `helm/voting-app/templates/vote-service.yaml` | Added `name: http` to port (required by ServiceMonitor) |
+| `helm/voting-app/templates/result-service.yaml` | Added `name: http` to port (required by ServiceMonitor) |
+
+**Key design decisions:**
+
+| Decision | Reasoning |
+|----------|-----------|
+| Separate `monitoring` namespace | Standard practice — keeps observability tooling isolated from app workloads |
+| `serviceMonitorSelectorNilUsesHelmValues: false` | Allows Prometheus to discover ServiceMonitors in any namespace, not just the one the Helm release is in |
+| `redis_exporter` as standalone Deployment | Redis has no native Prometheus endpoint; an exporter sidecar is the standard pattern |
+| Dashboard ConfigMaps with `grafana_dashboard: "1"` label | Grafana sidecar auto-provisions them at startup — no manual import required |
+| `loki-stack` Grafana disabled | Grafana is already provided by kube-prometheus-stack; running two instances would waste resources |
+
+**Install commands:**
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+kubectl create namespace monitoring
+
+helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+  -n monitoring -f monitoring/kube-prometheus-stack-values.yaml
+
+helm install loki-stack grafana/loki-stack \
+  -n monitoring -f monitoring/loki-stack-values.yaml
+
+kubectl apply -f monitoring/redis-exporter.yaml
+kubectl apply -f monitoring/servicemonitors.yaml
+kubectl apply -f monitoring/alerting-rules.yaml
+kubectl apply -f monitoring/dashboards/
+
+helm upgrade voting-app ./helm/voting-app
+```
+
+**Verification commands:**
+
+```bash
+# All monitoring pods running
+kubectl get pods -n monitoring
+
+# Prometheus targets — vote and result should show UP
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090 &
+open http://localhost:9090/targets
+
+# Grafana — admin / prom-operator
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3000:80 &
+open http://localhost:3000
+
+# Alertmanager
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093 &
+open http://localhost:9093
+
+# Loki logs in Grafana Explore: {namespace="default", app="vote"}
+```
+
+**Branch/PRs:** `feature/phase6-observability` → PR #50 → `dev`; promoted via PRs #51/#52 → `staging` → `main`
 
 ---
 
