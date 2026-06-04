@@ -14,6 +14,11 @@ Each entry is a real question asked during implementation, answered in context.
 - [Why did NetworkPolicy not block traffic in Minikube?](#why-did-networkpolicy-not-block-traffic-in-minikube)
 - [Why did the worker probe fail with "pgrep not found"?](#why-did-the-worker-probe-fail-with-pgrep-not-found)
 - [How do system design tiers map to Docker networks and Kubernetes?](#how-do-system-design-tiers-map-to-docker-networks-and-kubernetes)
+- [What is the Prometheus pull model and why does it matter?](#what-is-the-prometheus-pull-model-and-why-does-it-matter)
+- [What is a ServiceMonitor and how does Prometheus discover targets?](#what-is-a-servicemonitor-and-how-does-prometheus-discover-targets)
+- [How do Loki and Prometheus differ in what they collect?](#how-do-loki-and-prometheus-differ-in-what-they-collect)
+- [What is a PrometheusRule and how does alerting work in kube-prometheus-stack?](#what-is-a-prometheusrule-and-how-does-alerting-work-in-kube-prometheus-stack)
+- [Why do Kubernetes Services need named ports for ServiceMonitors?](#why-do-kubernetes-services-need-named-ports-for-servicemonitors)
 
 ---
 
@@ -349,5 +354,147 @@ No direct access  not in same network     not in policy allowlist
 ```
 
 The tier boundaries never change across the stack — only the tool that enforces them does.
+
+---
+
+## What is the Prometheus pull model and why does it matter?
+
+Most monitoring systems **push** metrics — the application sends data to a central collector. Prometheus inverts this: it **pulls** (scrapes) metrics by making HTTP GET requests to a `/metrics` endpoint on each target, on a schedule it controls.
+
+```
+Application pod          Prometheus server
+─────────────            ─────────────────
+GET /metrics  ←──────── scrape every 15 s
+200 OK + text ────────→ stores in TSDB
+```
+
+**Why pull is better for Kubernetes:**
+
+| Concern | Push | Pull |
+|---------|------|------|
+| Target discovery | App must know the collector address | Prometheus discovers targets from the cluster API |
+| Dead-target detection | Silent — stopped app stops sending | Prometheus marks target DOWN immediately |
+| Configuration ownership | Distributed — every app must be configured | Centralised — one Prometheus config rules all |
+| Back-pressure | Collector can be overwhelmed | Prometheus controls the scrape rate |
+
+**The exposition format** — what `/metrics` returns — is plain text:
+
+```
+# HELP flask_http_request_total Total HTTP requests
+# TYPE flask_http_request_total counter
+flask_http_request_total{method="GET",status="200"} 42
+```
+
+`prometheus-flask-exporter` generates this automatically for every Flask route. `prom-client` does the same for Node.js.
+
+---
+
+## What is a ServiceMonitor and how does Prometheus discover targets?
+
+A `ServiceMonitor` is a Kubernetes CRD (Custom Resource Definition) introduced by the Prometheus Operator. It is a declarative way to tell Prometheus: "scrape these Services, on this port, at this path."
+
+Without ServiceMonitors, you would edit Prometheus's `prometheus.yml` by hand every time a new service appeared. With the Operator pattern, you instead create a ServiceMonitor and Prometheus reconfigures itself automatically.
+
+**How it works:**
+
+```
+ServiceMonitor (CRD)
+  └─ selector: matchLabels: app=vote        ← find Services with this label
+  └─ namespaceSelector: [default]           ← in this namespace
+  └─ endpoints: port=http, path=/metrics    ← scrape this port/path
+
+Prometheus Operator watches ServiceMonitors
+  └─ translates them into scrape_configs
+  └─ hot-reloads Prometheus — no restart needed
+```
+
+**Named port requirement:** the ServiceMonitor references ports by *name*, not number. A Service port entry must have `name: http` (or any name); a bare `port: 80` with no name cannot be referenced.
+
+```yaml
+# Service — named port
+ports:
+  - name: http       ← ServiceMonitor references this
+    port: 80
+
+# ServiceMonitor
+endpoints:
+  - port: http       ← must match the name above
+    path: /metrics
+```
+
+**`serviceMonitorSelectorNilUsesHelmValues: false`** — by default kube-prometheus-stack only picks up ServiceMonitors in the same Helm release. Setting this to `false` opens it to ServiceMonitors in any namespace, which is necessary when the voting-app ServiceMonitors live in `monitoring` but the Services live in `default`.
+
+---
+
+## How do Loki and Prometheus differ in what they collect?
+
+They solve different observability problems and are deliberately kept separate:
+
+| | Prometheus | Loki |
+|--|-----------|------|
+| **What** | Numeric metrics (counters, gauges, histograms) | Raw log lines |
+| **How collected** | Pull — scrapes `/metrics` endpoints | Push — Promtail tails pod log files and ships to Loki |
+| **Storage** | Time-series database (TSDB) — optimised for numbers | Object storage — indexes only labels, not full text |
+| **Query language** | PromQL — arithmetic, aggregation, rates | LogQL — label filtering + regex on log content |
+| **Grafana panel** | Graph, stat, bar gauge | Logs panel, Explore |
+| **Answers** | "How many requests/sec?" "Is error rate rising?" | "What did the pod actually print when it crashed?" |
+
+**Promtail** is the log collector DaemonSet that bridges the gap: it runs on every node, tails `/var/log/pods/`, attaches Kubernetes labels (`namespace`, `pod`, `container`), and forwards structured log streams to Loki.
+
+**In this project:**
+- Prometheus answers questions like "is the worker down?" or "is the Redis queue backed up?"
+- Loki answers "what was in the worker's stdout before it crashed?" or "what did the vote service log when the error rate spiked?"
+
+---
+
+## What is a PrometheusRule and how does alerting work in kube-prometheus-stack?
+
+A `PrometheusRule` is another Prometheus Operator CRD. It defines alerting rules using PromQL expressions. When an expression evaluates to true for longer than the `for` duration, Prometheus fires an alert to Alertmanager.
+
+**Alert lifecycle:**
+
+```
+PrometheusRule (CRD)
+  └─ PromQL expression evaluated every eval_interval (default 1m)
+      └─ condition true for >= `for` duration → FIRING
+          └─ Prometheus sends alert to Alertmanager
+              └─ Alertmanager groups, deduplicates, routes → receiver
+```
+
+**The four alerts in this project:**
+
+| Alert | Expression | Severity |
+|-------|-----------|----------|
+| `WorkerDown` | `kube_deployment_status_replicas_available{deployment="worker"} == 0` | critical |
+| `VoteHighErrorRate` | 5xx rate / total rate > 5% | warning |
+| `RedisQueueBacklog` | `redis_list_length{key="votes"} > 100` | warning |
+| `DBConnectionsHigh` | `pg_stat_activity_count > 80` | warning |
+
+**Alertmanager** receives fired alerts and routes them to receivers (Slack, PagerDuty, email, etc.). For local Minikube use, the receiver is set to `log-only` (no external destination) — the alert still appears in the Alertmanager UI at `localhost:9093`.
+
+**Label propagation:** the `release: kube-prometheus-stack` label on both ServiceMonitors and PrometheusRules is how the Operator associates them with the correct Prometheus instance. Without it, the Operator ignores the resource.
+
+---
+
+## Why do Kubernetes Services need named ports for ServiceMonitors?
+
+Kubernetes port entries support an optional `name` field. ServiceMonitors reference ports by name — not number — because a Service may expose the same number on multiple protocols, or the port number may change between environments while the semantic name stays stable.
+
+**Without a name (ServiceMonitor cannot reference it):**
+```yaml
+ports:
+  - port: 80        # valid Service, but ServiceMonitor cannot reference this
+    targetPort: 80
+```
+
+**With a name (ServiceMonitor works):**
+```yaml
+ports:
+  - name: http      # ServiceMonitor uses this string
+    port: 80
+    targetPort: 80
+```
+
+**In the voting-app:** the vote and result Services originally had unnamed ports. The ServiceMonitors reference `port: http`, so the Helm templates were updated to add `name: http` to both Services. `helm lint` validated no regressions, and the change is backward-compatible — named ports are still addressable by number everywhere else.
 
 ---
