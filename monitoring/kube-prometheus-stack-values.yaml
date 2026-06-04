@@ -1,0 +1,44 @@
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+
+grafana:
+  adminPassword: prom-operator
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts:
+      - grafana.local
+    paths:
+      - /
+  sidecar:
+    dashboards:
+      enabled: true
+      searchNamespace: monitoring
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      url: http://loki-stack:3100
+      access: proxy
+      isDefault: false
+
+alertmanager:
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      group_by: ['alertname', 'namespace']
+      group_wait: 10s
+      group_interval: 10m
+      repeat_interval: 1h
+      receiver: 'log-only'
+    receivers:
+      - name: 'log-only'
+
+nodeExporter:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true

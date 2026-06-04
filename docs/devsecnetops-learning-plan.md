@@ -1157,24 +1157,159 @@ voting.local/result  HTTP 200      ✅
 
 ## Phase 6 — Observability
 
-**Goal:** Gain full visibility into metrics, logs, and traces.
+**Goal:** Full visibility into metrics, logs, and alerts for all 5 services running on Kubernetes.
 
-| Task | Tool |
-|------|------|
-| Metrics collection | **Prometheus** |
-| Metrics visualization | **Grafana** |
-| Flask metrics | **prometheus-flask-exporter** |
-| Log aggregation | **Loki** + **Promtail** or **EFK stack** |
-| Distributed tracing | **Jaeger** or **Tempo** |
-| Alerting | **Alertmanager** |
+### Observability pillars
 
-All-in-one local stack: Grafana OSS (Prometheus + Loki + Grafana + Tempo)
+| Pillar | Tool | What it answers |
+|--------|------|-----------------|
+| Metrics | Prometheus + Grafana | What is happening? (numbers over time) |
+| Logs | Loki + Promtail | Why is it happening? (raw pod output) |
+| Alerts | Alertmanager + PrometheusRule | Should I be worried? (threshold breaches) |
 
-Key dashboards to build:
-- Vote throughput per second
-- Redis queue depth (lag between vote and worker)
-- Worker processing latency
-- DB query duration from result service
+### Tools chosen
+
+| Tool | Helm chart | Purpose |
+|------|-----------|---------|
+| kube-prometheus-stack | `prometheus-community/kube-prometheus-stack` | Installs Prometheus + Grafana + Alertmanager + node-exporter + kube-state-metrics in one chart |
+| Loki | `grafana/loki-stack` | Log storage + Promtail DaemonSet (log collector) |
+| prometheus-flask-exporter | pip package | Expose `/metrics` on the vote Flask service |
+| prom-client | npm package | Expose `/metrics` on the result Node.js service |
+
+### Architecture after Phase 6
+
+```
+Minikube cluster
+├── default namespace          (voting app — unchanged)
+│   ├── vote, redis, worker, db, result
+│
+└── monitoring namespace       (new)
+    ├── prometheus-server       ← scrapes /metrics from all pods
+    ├── grafana                 ← dashboards, queries Prometheus + Loki
+    ├── alertmanager            ← receives alerts fired by Prometheus
+    ├── node-exporter (DS)      ← host-level CPU/mem/disk metrics
+    ├── kube-state-metrics      ← K8s object state (pod restarts, etc.)
+    ├── loki                    ← stores logs indexed by pod labels
+    └── promtail (DS)           ← tails /var/log/pods on the node → Loki
+```
+
+### Step-by-step implementation
+
+#### Step 1 — Add Grafana Helm repo and create monitoring namespace
+```bash
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+kubectl create namespace monitoring
+```
+
+#### Step 2 — Install kube-prometheus-stack
+Create `monitoring/kube-prometheus-stack-values.yaml` with:
+- Grafana ingress enabled at `grafana.local`
+- Prometheus retention 7 days
+- Alertmanager enabled (log receiver only for Minikube)
+- `prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues: false` — lets Prometheus pick up ServiceMonitors from any namespace
+
+```bash
+helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+  -n monitoring \
+  -f monitoring/kube-prometheus-stack-values.yaml
+```
+
+#### Step 3 — Expose metrics from vote (Python/Flask)
+Add `prometheus-flask-exporter` to `vote/requirements.txt`.  
+In `vote/app.py`, initialise the exporter — this auto-instruments all Flask routes and exposes `/metrics` with HTTP request counts, durations, and in-flight requests.
+
+#### Step 4 — Expose metrics from result (Node.js)
+Add `prom-client` to `result/package.json`.  
+In `result/server.js`, register a `/metrics` endpoint using the default registry — this auto-collects Node.js process metrics (event loop lag, heap, GC).
+
+#### Step 5 — Add ServiceMonitors
+Create `monitoring/servicemonitors.yaml` with `ServiceMonitor` CRDs for vote and result.  
+A ServiceMonitor tells Prometheus: "scrape this Service, on this port, at this path, every N seconds".
+
+```yaml
+# example for vote
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vote-monitor
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: vote
+  namespaceSelector:
+    matchNames: [default]
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+```
+
+The vote and result Services need a named port (`name: http`) for the ServiceMonitor to reference.
+
+#### Step 6 — Install Loki + Promtail
+Create `monitoring/loki-stack-values.yaml` with:
+- Loki enabled, single-binary mode (suitable for Minikube)
+- Promtail enabled as DaemonSet
+- Grafana datasource auto-configured
+
+```bash
+helm install loki-stack grafana/loki-stack \
+  -n monitoring \
+  -f monitoring/loki-stack-values.yaml
+```
+
+#### Step 7 — Create PrometheusRule alerting rules
+Create `monitoring/alerting-rules.yaml` with `PrometheusRule` CRD containing 4 rules:
+
+| Alert | PromQL condition | For |
+|-------|-----------------|-----|
+| `WorkerDown` | `kube_deployment_status_replicas_available{deployment="worker"} == 0` | 2m |
+| `VoteHighErrorRate` | `rate(flask_http_request_total{status=~"5.."}[1m]) / rate(flask_http_request_total[1m]) > 0.05` | 1m |
+| `RedisQueueBacklog` | `redis_list_length{key="votes"} > 100` | 2m |
+| `DBConnectionsHigh` | `pg_stat_activity_count > 80` | 2m |
+
+#### Step 8 — Build Grafana dashboards
+Create JSON dashboard definitions in `monitoring/dashboards/`:
+- `vote-throughput.json` — requests/sec, error rate, latency p50/p95
+- `queue-depth.json` — Redis list length over time
+- `worker-latency.json` — DB write rate, worker pod restarts
+- `cluster-overview.json` — pod CPU/memory across all 5 services
+
+Import dashboards into Grafana via ConfigMap (auto-provisioned by the kube-prometheus-stack sidecar).
+
+#### Step 9 — Update Helm values for vote + result Services
+The vote and result Services need named ports for ServiceMonitors to resolve them.  
+Update `helm/voting-app/templates/vote-service.yaml` and `result-service.yaml`.
+
+#### Step 10 — Verify everything
+```bash
+# Prometheus targets — all should be UP
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090 &
+open http://localhost:9090/targets
+
+# Grafana — login admin/prom-operator
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3000:80 &
+open http://localhost:3000
+
+# Alertmanager
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093 &
+open http://localhost:9093
+
+# Loki — search logs in Grafana Explore, datasource = Loki
+# Query: {namespace="default", app="vote"}
+```
+
+### Definition of Done
+
+- [ ] `kube-prometheus-stack` installed — Prometheus, Grafana, Alertmanager all running in `monitoring` ns
+- [ ] `loki-stack` installed — Loki + Promtail DaemonSet running
+- [ ] Prometheus Targets page shows vote and result as UP (green)
+- [ ] Grafana accessible — all 4 custom dashboards visible with live data
+- [ ] Loki datasource connected — pod logs searchable in Grafana Explore
+- [ ] All 4 PrometheusRule alerts present in Alertmanager UI
+- [ ] `helm upgrade voting-app` with named ports — no regressions
 
 ---
 

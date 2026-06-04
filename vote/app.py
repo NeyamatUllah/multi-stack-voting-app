@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, make_response, g
 from redis import Redis
+from prometheus_flask_exporter import PrometheusMetrics
 import os
 import socket
 import random
@@ -14,6 +15,7 @@ redis_port = int(os.getenv('REDIS_PORT', 6379))  # Default Redis port is 6379
 hostname = socket.gethostname()
 
 app = Flask(__name__)
+metrics = PrometheusMetrics(app)
 
 gunicorn_error_logger = logging.getLogger('gunicorn.error')
 app.logger.handlers.extend(gunicorn_error_logger.handlers)

@@ -1,0 +1,86 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-worker-latency
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  worker-latency.json: |
+    {
+      "title": "Worker Latency",
+      "uid": "worker-latency",
+      "version": 1,
+      "schemaVersion": 36,
+      "refresh": "30s",
+      "time": {"from": "now-1h", "to": "now"},
+      "panels": [
+        {
+          "id": 1,
+          "title": "Worker Pod Restarts",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "expr": "increase(kube_pod_container_status_restarts_total{namespace=\"default\", container=\"worker\"}[5m])",
+              "legendFormat": "restarts (5m)"
+            }
+          ],
+          "options": {},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+        },
+        {
+          "id": 2,
+          "title": "Worker Pod Ready",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "expr": "kube_deployment_status_replicas_available{namespace=\"default\", deployment=\"worker\"}",
+              "legendFormat": "available"
+            }
+          ],
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"},
+          "fieldConfig": {
+            "defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": 0}, {"color": "green", "value": 1}]}},
+            "overrides": []
+          }
+        },
+        {
+          "id": 3,
+          "title": "Result DB Query Rate",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "expr": "rate(nodejs_active_requests_total[1m])",
+              "legendFormat": "active requests"
+            }
+          ],
+          "options": {},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+        },
+        {
+          "id": 4,
+          "title": "Result Node.js Heap Used",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "expr": "nodejs_heap_size_used_bytes{app=\"result\"}",
+              "legendFormat": "heap used"
+            }
+          ],
+          "options": {},
+          "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []}
+        }
+      ]
+    }

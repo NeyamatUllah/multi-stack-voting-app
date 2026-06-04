@@ -1,0 +1,83 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-queue-depth
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  queue-depth.json: |
+    {
+      "title": "Redis Queue Depth",
+      "uid": "queue-depth",
+      "version": 1,
+      "schemaVersion": 36,
+      "refresh": "15s",
+      "time": {"from": "now-1h", "to": "now"},
+      "panels": [
+        {
+          "id": 1,
+          "title": "Votes Queue Length",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "expr": "redis_list_length{key=\"votes\"}",
+              "legendFormat": "votes queue depth"
+            }
+          ],
+          "options": {"tooltip": {"mode": "single"}},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+        },
+        {
+          "id": 2,
+          "title": "Vote Submission Rate",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "expr": "rate(flask_http_request_total{method=\"POST\"}[1m])",
+              "legendFormat": "POST /vote"
+            }
+          ],
+          "options": {},
+          "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}
+        },
+        {
+          "id": 3,
+          "title": "Redis Connected Clients",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "expr": "redis_connected_clients",
+              "legendFormat": "connected clients"
+            }
+          ],
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+        },
+        {
+          "id": 4,
+          "title": "Redis Memory Used",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "expr": "redis_memory_used_bytes",
+              "legendFormat": "memory used"
+            }
+          ],
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
+          "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []}
+        }
+      ]
+    }
