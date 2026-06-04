@@ -1,5 +1,6 @@
 loki:
   enabled: true
+  isDefault: false
   persistence:
     enabled: false
   config:
