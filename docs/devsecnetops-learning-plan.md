@@ -1424,22 +1424,379 @@ open http://localhost:9093
 
 ## Phase 7 — Secrets & Policy Management
 
-**Goal:** Treat secrets as infrastructure; enforce runtime security policies.
+**Goal:** Treat secrets as infrastructure; enforce admission-time and runtime security policies.
 
-| Task | Tool |
-|------|------|
-| Secrets store | **HashiCorp Vault** |
-| K8s secrets encryption | **Sealed Secrets** or **SOPS** + age |
-| K8s admission policies | **OPA Gatekeeper** or **Kyverno** |
-| Runtime threat detection | **Falco** |
-| Image signing | **Cosign** (Sigstore) |
-| SBOM generation | **Syft** or `trivy sbom` |
+### Problems being solved
 
-OPA/Kyverno policies to enforce:
-- No privileged containers
-- Non-root user required
-- Resource limits required on all pods
-- Only signed images allowed
+| Problem | Current state | Phase 7 fix |
+|---------|--------------|-------------|
+| Kubernetes Secrets are base64, not encrypted | `k8s/secret.yaml` readable by anyone with `kubectl get secret` | Vault (runtime) + Sealed Secrets (git) |
+| No audit trail for secret access | Any pod that mounts a Secret reads it silently | Vault logs every read with pod identity |
+| Nothing prevents misconfigured pods | Privileged containers, root users, missing limits all schedule fine | Kyverno admission policies |
+| Images could be tampered after CI | `latest` tag can be overwritten in GHCR | Cosign signs every image digest in CI |
+| No visibility into post-start container behaviour | A clean container can exec a shell or read `/etc/shadow` at runtime | Falco syscall monitoring |
+
+### Tools chosen
+
+| Tool | What it does | Scope |
+|------|-------------|-------|
+| **HashiCorp Vault** | Secrets API — pods request secrets at runtime using their K8s service account identity | Replaces plaintext K8s Secrets for DB credentials |
+| **Sealed Secrets** | Encrypts K8s Secrets with the cluster's public key so they are safe to commit to git | Replaces `k8s/secret.yaml` in the repo |
+| **Kyverno** | K8s-native admission controller — ClusterPolicy CRDs block non-compliant pods at apply time | 4 policies: no privileged, non-root, resource limits, signed images |
+| **Cosign** | Signs OCI image digests after CI push; Kyverno verifies the signature at admission | Added to CI workflow; verified at `kubectl apply` |
+| **Falco** | eBPF-based syscall monitor — fires alerts on suspicious container behaviour at runtime | DaemonSet on all nodes; custom rules for the voting app |
+
+### Architecture after Phase 7
+
+```
+git push
+  └─ Gitleaks: no secrets in code?                     ← Phase 2/4 (done)
+  └─ CI builds image
+  └─ Trivy: no HIGH/CRITICAL CVEs?                     ← Phase 3 (done)
+  └─ cosign sign ghcr.io/neyamatullah/<svc>:<sha>      ← Phase 7 Step 4
+
+kubectl apply
+  └─ Kyverno webhook
+      ├─ image has valid Cosign signature?             ← Phase 7 Step 4
+      ├─ runAsNonRoot: true?                           ← Phase 7 Step 1
+      ├─ resource limits set?                          ← Phase 7 Step 1
+      └─ not privileged?                               ← Phase 7 Step 1
+  └─ Pod scheduled
+      ├─ vault-agent init container authenticates      ← Phase 7 Step 3
+      │   └─ writes DB secret to /vault/secrets/
+      └─ app reads secret from file — not env var
+  └─ Falco DaemonSet watches every syscall             ← Phase 7 Step 5
+
+git repo
+  └─ SealedSecret (encrypted YAML) committed          ← Phase 7 Step 2
+  └─ plaintext k8s/secret.yaml deleted from repo
+```
+
+### Implementation order
+
+Do these in order — each step builds on the previous.
+
+#### Step 1 — Kyverno in audit mode (find violations before enforcing)
+
+Install Kyverno and run it in `audit` mode first. This tells you what is already broken without blocking anything.
+
+```bash
+helm repo add kyverno https://kyverno.github.io/kyverno
+helm repo update
+helm install kyverno kyverno/kyverno -n kyverno --create-namespace
+```
+
+Create `policy/` directory with three `ClusterPolicy` manifests in `audit` mode:
+
+**`policy/no-privileged.yaml`**
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privileged-containers
+spec:
+  validationFailureAction: Audit
+  rules:
+    - name: check-privileged
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "Privileged containers are not allowed."
+        pattern:
+          spec:
+            containers:
+              - =(securityContext):
+                  =(privileged): "false"
+```
+
+**`policy/require-non-root.yaml`**
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-run-as-non-root
+spec:
+  validationFailureAction: Audit
+  rules:
+    - name: check-runAsNonRoot
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "Containers must not run as root."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  runAsNonRoot: true
+```
+
+**`policy/require-limits.yaml`**
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resource-limits
+spec:
+  validationFailureAction: Audit
+  rules:
+    - name: check-limits
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "CPU and memory limits are required."
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  limits:
+                    cpu: "?*"
+                    memory: "?*"
+```
+
+Check violations after applying:
+```bash
+kubectl get policyreport -A
+kubectl describe policyreport -n default
+```
+
+#### Step 2 — Fix the Helm chart to pass all policies
+
+Based on the audit report, update `helm/voting-app/` so every container has:
+
+- `securityContext.runAsNonRoot: true`
+- `securityContext.allowPrivilegeEscalation: false`
+- `resources.limits.cpu` and `resources.limits.memory`
+
+Add a `securityContext` block to each Deployment template, e.g. for the vote pod:
+
+```yaml
+# In helm/voting-app/templates/vote-deployment.yaml
+containers:
+  - name: vote
+    securityContext:
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+```
+
+Worker (.NET) and result (Node.js) both run as non-root by default. The db (PostgreSQL) and redis containers need `runAsNonRoot: false` exempted via a namespace exclusion or a separate policy scope.
+
+Verify clean with helm lint then upgrade:
+```bash
+helm lint helm/voting-app/
+helm upgrade voting-app ./helm/voting-app
+kubectl get policyreport -n default   # should show 0 violations
+```
+
+#### Step 3 — Switch Kyverno to enforce mode
+
+Once `kubectl get policyreport` shows zero violations for your app pods, flip `validationFailureAction` from `Audit` to `Enforce` in all three ClusterPolicy files. From this point, any `kubectl apply` that violates a policy is denied at the API server.
+
+```bash
+# Quick test after switching to Enforce
+kubectl run bad-pod --image=nginx --overrides='{"spec":{"containers":[{"name":"c","image":"nginx","securityContext":{"privileged":true}}]}}'
+# Expected: Error from server: admission webhook denied the request
+```
+
+#### Step 4 — Sealed Secrets (encrypt the K8s Secret for git)
+
+Install the controller and CLI:
+```bash
+helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
+helm install sealed-secrets sealed-secrets/sealed-secrets -n kube-system
+# CLI (Linux)
+curl -L https://github.com/bitnami-labs/sealed-secrets/releases/latest/download/kubeseal-linux-amd64 -o kubeseal
+chmod +x kubeseal && sudo mv kubeseal /usr/local/bin/
+```
+
+Seal the existing secret:
+```bash
+kubectl create secret generic voting-app-secret \
+  --from-literal=POSTGRES_USER=postgres \
+  --from-literal=POSTGRES_PASSWORD=postgres \
+  --from-literal=POSTGRES_DB=postgres \
+  --dry-run=client -o yaml \
+| kubeseal --format yaml > k8s/sealed-secret.yaml
+```
+
+Delete the plaintext file and apply the sealed version:
+```bash
+git rm k8s/secret.yaml
+kubectl apply -f k8s/sealed-secret.yaml
+```
+
+The `sealed-secrets` controller decrypts `SealedSecret` → creates the actual `Secret` in the cluster. The rest of the app (Helm chart, Deployments) continues to reference the Secret by name — no app changes needed.
+
+The sealed YAML is safe to commit: it is encrypted with the cluster's RSA public key and can only be decrypted by the controller in this specific cluster.
+
+#### Step 5 — HashiCorp Vault (runtime secrets injection)
+
+Install Vault in dev mode (suitable for Minikube — resets on restart):
+```bash
+helm repo add hashicorp https://helm.releases.hashicorp.com
+helm install vault hashicorp/vault -n vault --create-namespace \
+  --set server.dev.enabled=true \
+  --set injector.enabled=true
+```
+
+Configure Vault inside the pod:
+```bash
+kubectl exec -n vault vault-0 -- vault auth enable kubernetes
+
+kubectl exec -n vault vault-0 -- vault write auth/kubernetes/config \
+  kubernetes_host="https://kubernetes.default.svc.cluster.local"
+
+# Store the DB credentials
+kubectl exec -n vault vault-0 -- vault kv put secret/voting-app/db \
+  username=postgres password=postgres dbname=postgres
+
+# Policy — allow reading this path
+kubectl exec -n vault vault-0 -- vault policy write voting-app-policy - <<EOF
+path "secret/data/voting-app/db" { capabilities = ["read"] }
+EOF
+
+# Role — bind the policy to the worker's K8s service account
+kubectl exec -n vault vault-0 -- vault write auth/kubernetes/role/worker \
+  bound_service_account_names=worker \
+  bound_service_account_namespaces=default \
+  policies=voting-app-policy \
+  ttl=1h
+```
+
+Create a dedicated service account for the worker and annotate its Deployment:
+```yaml
+# In helm/voting-app/templates/worker-deployment.yaml
+spec:
+  template:
+    metadata:
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "worker"
+        vault.hashicorp.com/agent-inject-secret-db: "secret/data/voting-app/db"
+        vault.hashicorp.com/agent-inject-template-db: |
+          {{- with secret "secret/data/voting-app/db" -}}
+          DB_USERNAME={{ .Data.data.username }}
+          DB_PASSWORD={{ .Data.data.password }}
+          DB_NAME={{ .Data.data.dbname }}
+          {{- end }}
+```
+
+The worker reads credentials from `/vault/secrets/db` at startup instead of environment variables. Remove `DB_PASSWORD` from the Kubernetes Secret.
+
+#### Step 6 — Cosign (sign images in CI)
+
+Add a signing step to `.github/workflows/ci.yml` after each image push:
+
+```yaml
+- name: Install Cosign
+  uses: sigstore/cosign-installer@v3
+
+- name: Sign image
+  env:
+    COSIGN_EXPERIMENTAL: "true"    # keyless — uses GitHub OIDC
+  run: |
+    cosign sign --yes \
+      ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}:${{ github.sha }}
+```
+
+Keyless signing uses GitHub's OIDC token — no long-lived key to store. The signature is recorded in Sigstore's public transparency log (Rekor) and stored alongside the image in GHCR as an OCI artifact.
+
+Add a Kyverno `ClusterPolicy` to verify signatures at admission:
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-signed-images
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: check-image-signature
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/neyamatullah/*"
+          attestors:
+            - entries:
+                - keyless:
+                    subject: "https://github.com/NeyamatUllah/*"
+                    issuer: "https://token.actions.githubusercontent.com"
+```
+
+#### Step 7 — Falco (runtime threat detection)
+
+Install with the eBPF driver (works on Minikube without a kernel module):
+```bash
+helm repo add falcosecurity https://falcosecurity.github.io/charts
+helm install falco falcosecurity/falco -n falco --create-namespace \
+  --set driver.kind=ebpf \
+  --set tty=true
+```
+
+Check that Falco is capturing events:
+```bash
+kubectl logs -n falco -l app.kubernetes.io/name=falco -f
+```
+
+Add a custom rule for the voting app in `policy/falco-rules.yaml`:
+```yaml
+- rule: Unexpected file read in vote container
+  desc: vote should only read from /app
+  condition: >
+    spawned_process and container.name = "vote"
+    and not fd.name startswith /app
+    and not fd.name startswith /proc
+    and not fd.name startswith /dev
+  output: "Unexpected file access in vote container (file=%fd.name user=%user.name)"
+  priority: WARNING
+
+- rule: Shell spawned in voting-app container
+  desc: No shell should ever be exec'd in a production container
+  condition: >
+    spawned_process and container.name in (vote, result, worker)
+    and proc.name in (sh, bash, ash, dash)
+  output: "Shell spawned in voting-app (container=%container.name shell=%proc.name)"
+  priority: CRITICAL
+```
+
+Apply and test:
+```bash
+kubectl apply -f policy/falco-rules.yaml
+# Trigger a rule deliberately to confirm it fires:
+kubectl exec -n default deploy/vote -- sh -c "echo test"
+# Expect CRITICAL alert in Falco logs
+```
+
+Wire Falco alerts to Alertmanager (Phase 6) using `falco-exporter`:
+```bash
+helm install falco-exporter falcosecurity/falco-exporter -n falco
+# ServiceMonitor + PrometheusRule for Falco alert counts
+```
+
+### Definition of Done
+
+- [ ] Kyverno installed — `kubectl get policyreport -n default` shows 0 violations for voting-app pods
+- [ ] All 3 ClusterPolicies in `Enforce` mode — privileged pod rejected at `kubectl apply`
+- [ ] `k8s/sealed-secret.yaml` committed to git — plaintext `k8s/secret.yaml` deleted
+- [ ] Vault running — worker pod starts with DB credentials injected via vault-agent (no K8s Secret for DB password)
+- [ ] Cosign signing step in CI — every GHCR image has a verifiable signature
+- [ ] `require-signed-images` Kyverno policy in Enforce mode — unsigned image rejected
+- [ ] Falco DaemonSet running — shell-in-container rule fires when tested
 
 ---
 

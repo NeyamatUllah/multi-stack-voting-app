@@ -119,3 +119,27 @@ jobs:
           tags: |
             ghcr.io/neyamatullah/${{ matrix.service }}:latest
             ghcr.io/neyamatullah/${{ matrix.service }}:${{ github.sha }}
+
+  sign:
+    name: Sign image (${{ matrix.service }})
+    needs: push
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      id-token: write
+    strategy:
+      matrix:
+        service: [vote, result, worker]
+    steps:
+      - uses: sigstore/cosign-installer@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Sign ${{ matrix.service }}
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          cosign sign --yes \
+            ghcr.io/neyamatullah/${{ matrix.service }}:${{ github.sha }}

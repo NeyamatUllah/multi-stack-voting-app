@@ -75,3 +75,11 @@ ingress:
 
 networkPolicy:
   enabled: true
+
+sealedSecrets:
+  enabled: false
+
+vault:
+  enabled: false
+  role: worker
+  secretPath: secret/data/voting-app/db
