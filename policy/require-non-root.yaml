@@ -1,0 +1,36 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-run-as-non-root
+  annotations:
+    policies.kyverno.io/title: Require Non-Root Containers
+    policies.kyverno.io/description: >-
+      Running containers as root expands the attack surface significantly.
+      This policy requires runAsNonRoot: true for all app containers.
+      The db (PostgreSQL) pod is excluded because its entrypoint uses gosu
+      to switch users and does not set a non-root USER in the image config.
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: check-runAsNonRoot
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              selector:
+                matchLabels:
+                  app: db
+      validate:
+        message: "Containers must not run as root. Set securityContext.runAsNonRoot: true."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  runAsNonRoot: true

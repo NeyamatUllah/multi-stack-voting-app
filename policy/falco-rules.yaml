@@ -1,0 +1,54 @@
+- rule: Shell spawned in voting-app container
+  desc: No shell should ever be exec'd in a running voting-app container
+  condition: >
+    spawned_process and
+    container.name in (vote, result, worker) and
+    proc.name in (sh, bash, ash, dash, zsh)
+  output: >
+    Shell spawned in voting-app
+    (container=%container.name shell=%proc.name user=%user.name
+     image=%container.image.repository:%container.image.tag)
+  priority: CRITICAL
+  tags: [voting-app, shell, runtime]
+
+- rule: Unexpected file read in vote container
+  desc: vote reads only from /app and /proc; any other path is suspicious
+  condition: >
+    open_read and
+    container.name = vote and
+    not fd.name startswith /app and
+    not fd.name startswith /proc and
+    not fd.name startswith /dev and
+    not fd.name startswith /sys and
+    not fd.name startswith /etc/ssl and
+    not fd.name startswith /usr/lib and
+    not fd.name startswith /tmp
+  output: >
+    Unexpected file read in vote container
+    (file=%fd.name user=%user.name image=%container.image.repository)
+  priority: WARNING
+  tags: [voting-app, file-access]
+
+- rule: Unexpected outbound connection from worker
+  desc: worker should only connect to redis and db; any other destination is suspicious
+  condition: >
+    outbound and
+    container.name = worker and
+    not fd.sport in (6379, 5432)
+  output: >
+    Unexpected outbound connection from worker
+    (dest=%fd.rip:%fd.rport user=%user.name image=%container.image.repository)
+  priority: WARNING
+  tags: [voting-app, network]
+
+- rule: Write to /etc in voting-app container
+  desc: No voting-app container should write to /etc
+  condition: >
+    open_write and
+    container.name in (vote, result, worker) and
+    fd.name startswith /etc
+  output: >
+    Write to /etc in voting-app container
+    (file=%fd.name container=%container.name user=%user.name)
+  priority: ERROR
+  tags: [voting-app, file-write]

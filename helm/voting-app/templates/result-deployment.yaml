@@ -17,6 +17,9 @@ spec:
       containers:
         - name: result
           image: {{ .Values.result.image.repository }}:{{ .Values.result.image.tag }}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
           ports:
             - containerPort: 80
           env:
