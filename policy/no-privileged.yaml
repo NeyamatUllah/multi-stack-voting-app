@@ -8,7 +8,7 @@ metadata:
       Privileged containers have the same access as processes running on the host node.
       This policy blocks any Pod that sets securityContext.privileged=true.
 spec:
-  validationFailureAction: Audit
+  validationFailureAction: Enforce
   background: true
   rules:
     - name: check-privileged

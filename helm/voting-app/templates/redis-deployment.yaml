@@ -17,9 +17,6 @@ spec:
       containers:
         - name: redis
           image: {{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}
-          securityContext:
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
           ports:
             - containerPort: 6379
           resources:

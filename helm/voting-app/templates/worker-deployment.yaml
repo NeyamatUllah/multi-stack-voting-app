@@ -32,6 +32,7 @@ spec:
           image: {{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}
           securityContext:
             runAsNonRoot: true
+            runAsUser: 100
             allowPrivilegeEscalation: false
           env:
             - name: REDIS_HOST

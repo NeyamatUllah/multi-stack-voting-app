@@ -19,6 +19,7 @@ spec:
           image: {{ .Values.vote.image.repository }}:{{ .Values.vote.image.tag }}
           securityContext:
             runAsNonRoot: true
+            runAsUser: 100
             allowPrivilegeEscalation: false
           ports:
             - containerPort: 80

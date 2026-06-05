@@ -8,7 +8,7 @@ metadata:
       Containers without CPU and memory limits can consume unbounded node resources
       and starve neighbouring workloads. This policy requires both limits to be set.
 spec:
-  validationFailureAction: Audit
+  validationFailureAction: Enforce
   background: true
   rules:
     - name: check-limits
