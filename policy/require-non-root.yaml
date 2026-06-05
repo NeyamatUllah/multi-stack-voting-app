@@ -24,6 +24,14 @@ spec:
           - resources:
               kinds:
                 - Pod
+              namespaces:
+                - kube-system
+                - vault
+                - falco
+                - monitoring
+          - resources:
+              kinds:
+                - Pod
               selector:
                 matchLabels:
                   app: db
