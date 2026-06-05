@@ -13,10 +13,27 @@ spec:
     metadata:
       labels:
         app: worker
+      {{- if .Values.vault.enabled }}
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "{{ .Values.vault.role }}"
+        vault.hashicorp.com/agent-inject-secret-db: "{{ .Values.vault.secretPath }}"
+        vault.hashicorp.com/agent-inject-template-db: |
+          {{ "{{" }}- with secret "{{ .Values.vault.secretPath }}" -{{ "}}" }}
+          DB_USERNAME={{ "{{" }} .Data.data.username {{ "}}" }}
+          DB_PASSWORD={{ "{{" }} .Data.data.password {{ "}}" }}
+          DB_NAME={{ "{{" }} .Data.data.dbname {{ "}}" }}
+          {{ "{{" }}- end {{ "}}" }}
+      {{- end }}
     spec:
+      serviceAccountName: worker
       containers:
         - name: worker
           image: {{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 100
+            allowPrivilegeEscalation: false
           env:
             - name: REDIS_HOST
               valueFrom:
@@ -28,6 +45,7 @@ spec:
                 configMapKeyRef:
                   name: app-config
                   key: DB_HOST
+            {{- if not .Values.vault.enabled }}
             - name: DB_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -43,6 +61,7 @@ spec:
                 secretKeyRef:
                   name: db-credentials
                   key: POSTGRES_DB
+            {{- end }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
           readinessProbe:
