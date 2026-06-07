@@ -1,3 +1,4 @@
+{{- if not .Values.externalRedis.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -10,3 +11,4 @@ spec:
   ports:
     - port: 6379
       targetPort: 6379
+{{- end }}

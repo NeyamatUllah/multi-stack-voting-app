@@ -1,0 +1,43 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: external-dns
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://kubernetes-sigs.github.io/external-dns
+    chart: external-dns
+    targetRevision: 1.14.x
+    helm:
+      releaseName: external-dns
+      values: |
+        provider: azure
+        # ExternalDNS reads Azure credentials from a secret named 'azure-config-file'
+        # in the same namespace. Create it with:
+        #   kubectl create secret generic azure-config-file \
+        #     --from-file=azure.json=/path/to/azure.json \
+        #     -n external-dns
+        azure:
+          resourceGroup: voting-app-rg
+          # tenantId, subscriptionId, aadClientId, aadClientSecret are read
+          # from the azure.json secret file at runtime.
+        txtOwnerId: voting-app-aks
+        domainFilters:
+          - example.com   # replace with var.dns_zone_name
+        policy: sync
+        sources:
+          - ingress
+          - service
+        interval: 1m
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: external-dns
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
