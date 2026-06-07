@@ -1,0 +1,35 @@
+# ArgoCD Helm values for the voting-app AKS cluster.
+# Install with:
+#   helm repo add argo https://argoproj.github.io/argo-helm
+#   helm upgrade --install argocd argo/argo-cd \
+#     --namespace argocd --create-namespace \
+#     --version 7.x \
+#     -f argocd/install-values.yaml
+
+global:
+  domain: argocd.example.com   # replace with your actual domain
+
+server:
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    tls: true
+
+configs:
+  params:
+    # Disable insecure mode — ArgoCD is behind the nginx TLS ingress
+    server.insecure: false
+
+  cm:
+    # Allow ArgoCD to manage resources in all namespaces
+    application.resourceTrackingMethod: annotation
+
+  rbac:
+    policy.default: role:readonly
+    policy.csv: |
+      p, role:admin, applications, *, */*, allow
+      p, role:admin, clusters, *, *, allow
+      p, role:admin, repositories, *, *, allow
+      g, system:masters, role:admin
