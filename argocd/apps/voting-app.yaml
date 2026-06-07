@@ -1,0 +1,65 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: voting-app
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/NeyamatUllah/multi-stack-voting-app
+    targetRevision: main
+    path: helm/voting-app
+    helm:
+      releaseName: voting-app
+      # Override values for AKS cloud deployment.
+      # Replace the placeholder hosts with real Terraform outputs.
+      values: |
+        vote:
+          image:
+            tag: latest
+        result:
+          image:
+            tag: latest
+        worker:
+          image:
+            tag: latest
+
+        externalDb:
+          enabled: true
+          host: "voting-app-postgres.voting-app.postgres.database.azure.com"
+          port: 5432
+          user: "psqladmin"
+          # Store password in a sealed secret or Vault; do not hardcode here.
+          password: ""
+          name: "postgres"
+
+        externalRedis:
+          enabled: true
+          host: "voting-app-redis.redis.cache.windows.net"
+          port: 6379
+
+        ingress:
+          host: "vote.example.com"   # replace with your domain
+          className: nginx
+          tls:
+            enabled: true
+            secretName: voting-tls
+
+        networkPolicy:
+          enabled: true
+
+        sealedSecrets:
+          enabled: false
+        vault:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: voting-app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

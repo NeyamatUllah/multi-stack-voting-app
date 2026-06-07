@@ -7,7 +7,7 @@ metadata:
 data:
   OPTION_A: {{ .Values.vote.options.a | quote }}
   OPTION_B: {{ .Values.vote.options.b | quote }}
-  REDIS_HOST: "redis"
-  REDIS_PORT: "6379"
-  DB_HOST: "db"
-  DB_NAME: {{ .Values.db.credentials.name | quote }}
+  REDIS_HOST: {{ if .Values.externalRedis.enabled }}{{ .Values.externalRedis.host | quote }}{{ else }}"redis"{{ end }}
+  REDIS_PORT: {{ if .Values.externalRedis.enabled }}{{ .Values.externalRedis.port | quote }}{{ else }}"6379"{{ end }}
+  DB_HOST: {{ if .Values.externalDb.enabled }}{{ .Values.externalDb.host | quote }}{{ else }}"db"{{ end }}
+  DB_NAME: {{ if .Values.externalDb.enabled }}{{ .Values.externalDb.name | quote }}{{ else }}{{ .Values.db.credentials.name | quote }}{{ end }}
