@@ -5,7 +5,7 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: admin@example.com   # replace with your email address before applying
+    email: sheikh.neyamat@gmail.com
     privateKeySecretRef:
       name: letsencrypt-prod-key
     solvers:
