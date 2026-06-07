@@ -1,12 +1,3 @@
-resource "azurerm_log_analytics_workspace" "this" {
-  name                = "voting-app-logs"
-  resource_group_name = var.resource_group_name
-  location            = var.location
-  sku                 = "PerGB2018"
-  retention_in_days   = 30
-  tags                = var.tags
-}
-
 # tfsec:ignore:AVD-AZU-0040 — private cluster adds significant complexity for a learning deployment
 resource "azurerm_kubernetes_cluster" "this" {
   name                = "voting-app-aks"
@@ -17,11 +8,13 @@ resource "azurerm_kubernetes_cluster" "this" {
   tags                = var.tags
 
   default_node_pool {
-    name            = "system"
-    node_count      = var.node_count
-    vm_size         = var.node_vm_size
-    vnet_subnet_id  = var.backend_subnet_id
-    os_disk_size_gb = 50
+    name                        = "system"
+    temporary_name_for_rotation = "systmp"
+    node_count                  = var.node_count
+    vm_size                     = var.node_vm_size
+    vnet_subnet_id              = var.backend_subnet_id
+    os_disk_size_gb             = 50
+    max_pods                    = 40
   }
 
   oidc_issuer_enabled = true
@@ -43,9 +36,5 @@ resource "azurerm_kubernetes_cluster" "this" {
   azure_active_directory_role_based_access_control {
     managed            = true
     azure_rbac_enabled = true
-  }
-
-  oms_agent {
-    log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
   }
 }
