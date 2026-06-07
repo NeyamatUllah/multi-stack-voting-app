@@ -29,23 +29,5 @@ output "postgres_admin_username" {
   value       = module.postgres.admin_username
 }
 
-output "redis_host" {
-  description = "Hostname of the Azure Cache for Redis instance."
-  value       = module.redis.hostname
-}
-
-output "redis_ssl_port" {
-  description = "SSL port for Redis — prefer this over non-SSL in production."
-  value       = module.redis.ssl_port
-}
-
-output "redis_non_ssl_port" {
-  description = "Non-SSL port (6379) — enabled for app compatibility; migrate to SSL port in production."
-  value       = 6379
-}
-
-output "redis_primary_key" {
-  description = "Primary access key for the Redis instance."
-  value       = module.redis.primary_access_key
-  sensitive   = true
-}
+# Redis outputs removed — Azure Cache for Redis retired in this region.
+# In-cluster Redis K8s Deployment is used; no external Redis credentials needed.
