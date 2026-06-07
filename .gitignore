@@ -19,3 +19,11 @@ node_modules/
 # OS
 .DS_Store
 Thumbs.db
+
+# Terraform — never commit state or provider cache (state contains secrets)
+.terraform/
+terraform.tfstate
+terraform.tfstate.backup
+terraform.tfstate.*.backup
+tfplan
+*.tfplan
