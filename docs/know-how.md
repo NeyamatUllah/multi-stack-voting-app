@@ -19,6 +19,13 @@ Each entry is a real question asked during implementation, answered in context.
 - [How do Loki and Prometheus differ in what they collect?](#how-do-loki-and-prometheus-differ-in-what-they-collect)
 - [What is a PrometheusRule and how does alerting work in kube-prometheus-stack?](#what-is-a-prometheusrule-and-how-does-alerting-work-in-kube-prometheus-stack)
 - [Why do Kubernetes Services need named ports for ServiceMonitors?](#why-do-kubernetes-services-need-named-ports-for-servicemonitors)
+- [What is Kyverno and how does it differ from OPA/Gatekeeper?](#what-is-kyverno-and-how-does-it-differ-from-opagatekeeper)
+- [Why does runAsNonRoot: true fail when the image uses a named USER?](#why-does-runasnonroot-true-fail-when-the-image-uses-a-named-user)
+- [Why is redis incompatible with allowPrivilegeEscalation: false?](#why-is-redis-incompatible-with-allowprivilegeescalation-false)
+- [What is the difference between Sealed Secrets and Vault?](#what-is-the-difference-between-sealed-secrets-and-vault)
+- [How does Vault agent injection work in Kubernetes?](#how-does-vault-agent-injection-work-in-kubernetes)
+- [What is Cosign keyless signing and how does it work?](#what-is-cosign-keyless-signing-and-how-does-it-work)
+- [Why does Falco show container_name=NA on Minikube with the Docker driver?](#why-does-falco-show-container_namena-on-minikube-with-the-docker-driver)
 
 ---
 
@@ -496,5 +503,271 @@ ports:
 ```
 
 **In the voting-app:** the vote and result Services originally had unnamed ports. The ServiceMonitors reference `port: http`, so the Helm templates were updated to add `name: http` to both Services. `helm lint` validated no regressions, and the change is backward-compatible — named ports are still addressable by number everywhere else.
+
+---
+
+## What is Kyverno and how does it differ from OPA/Gatekeeper?
+
+Both are Kubernetes admission controllers that enforce policies at the API server webhook level — they intercept every `kubectl apply` and can block or mutate resources before they are accepted.
+
+| | Kyverno | OPA/Gatekeeper |
+|--|---------|----------------|
+| Policy language | YAML (ClusterPolicy CRD — native K8s style) | Rego (a purpose-built logic language) |
+| Learning curve | Low — familiar YAML patterns | High — Rego requires learning a new language |
+| Background scanning | Yes — scans existing resources on schedule | Partial |
+| Image verification | Built-in `verifyImages` with Cosign support | Needs external tooling |
+| Mutation | Yes — can add/patch fields at admission | Yes |
+
+**Kyverno ClusterPolicy anatomy:**
+
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+spec:
+  validationFailureAction: Enforce   # or Audit (log only)
+  background: true                   # also scan existing resources
+  rules:
+    - name: check-privileged
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          - resources:
+              namespaces: [kube-system, vault]   # don't apply to system namespaces
+      validate:
+        message: "Privileged containers are not allowed."
+        pattern:
+          spec:
+            containers:
+              - =(securityContext):
+                  =(privileged): "false"
+```
+
+**`=(field):`** — the `=()` wrapper means "if this field exists, it must match the pattern." Without it, Kyverno would reject pods that don't set `securityContext` at all.
+
+**Audit vs Enforce:** start in Audit mode to identify violations without breaking anything, then flip to Enforce once your own workloads are clean. Use `kubectl get policyreport -A` to see findings.
+
+**In this project:** three policies in Enforce mode (`no-privileged`, `require-non-root`, `require-limits`) and one in Audit (`require-signed-images` — pending live cluster verification).
+
+---
+
+## Why does runAsNonRoot: true fail when the image uses a named USER?
+
+Kubernetes evaluates `runAsNonRoot: true` at admission — before pulling the image. It checks whether the effective UID is non-zero. The problem: Kubernetes can only verify a **numeric** UID at this point; it cannot resolve a named user like `appuser` or `node` to a UID without reading the image's `/etc/passwd` — which requires pulling the image.
+
+```
+Error: container has runAsNonRoot and image has non-numeric user (appuser),
+       cannot verify user is non-root
+```
+
+**Fix:** always specify `runAsUser: <UID>` alongside `runAsNonRoot: true`. Find the UID the Dockerfile sets:
+
+```bash
+docker run --rm --entrypoint id ghcr.io/neyamatullah/vote:latest
+# uid=100(appuser) gid=65533(nogroup) ...
+```
+
+Then in the pod spec:
+
+```yaml
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 100          # numeric UID Kubernetes can verify at admission
+  allowPrivilegeEscalation: false
+```
+
+**In this project:**
+
+| Service | Named user | Numeric UID |
+|---------|-----------|-------------|
+| vote | appuser | 100 |
+| worker | appuser | 100 |
+| result | node | 1000 |
+
+---
+
+## Why is redis incompatible with allowPrivilegeEscalation: false?
+
+The `redis:7-alpine` official image has a specific startup pattern:
+
+1. The container starts as **root** (image `USER` is empty / root)
+2. The entrypoint script calls `gosu redis <cmd>` to drop to the `redis` user before starting the server
+
+`gosu` works by calling `execve()` with the `setuid` syscall — it literally becomes the target user. `allowPrivilegeEscalation: false` is implemented via the `no_new_privs` Linux flag, which blocks `setuid` execution. With the flag set, `gosu` cannot change the UID and the container fails to start.
+
+**Why not just add `runAsUser: 999` (the redis UID)?**
+The official image expects to start as root so it can set file permissions on `/data` before dropping privileges. Forcing a non-root start breaks that initialization sequence.
+
+**Resolution in this project:**
+- Remove `securityContext` from the redis Deployment template entirely
+- Exclude pods with `app: redis` label from the `require-run-as-non-root` Kyverno policy
+
+This is a deliberate exception documented in the policy's `exclude` block. The same pattern applies to the official PostgreSQL image.
+
+---
+
+## What is the difference between Sealed Secrets and Vault?
+
+They solve different parts of the secrets problem and are used together, not as alternatives.
+
+| | Sealed Secrets | HashiCorp Vault |
+|--|---------------|-----------------|
+| **Problem solved** | How to store K8s Secrets safely in git | How pods access secrets at runtime without K8s Secrets at all |
+| **Mechanism** | Encrypts a K8s Secret manifest with the cluster's RSA public key so the YAML is safe to commit | Runs a secrets API server; pods authenticate with their K8s service account and retrieve secrets over HTTP |
+| **At rest** | Encrypted YAML in git; cluster controller decrypts on apply | Secrets stored in Vault's encrypted backend; never in etcd or git |
+| **At runtime** | Becomes a normal K8s Secret in the cluster | `vault-agent` sidecar retrieves and writes secrets to a shared volume; app reads from file |
+| **Audit trail** | None — K8s audit logs show Secret reads but not who | Full audit log: every secret read is logged with pod identity, timestamp, path |
+| **Rotation** | Re-seal with `kubeseal` and apply the new YAML | Update the value in Vault; vault-agent refreshes the file on TTL expiry |
+| **Fits when** | You need secrets committed to git safely (GitOps) | You need runtime identity-based access and auditability |
+
+**In this project:** both are used together:
+- `k8s/sealed-secret.yaml` (Sealed Secrets) keeps the encrypted credentials in git and bootstraps the cluster
+- Vault injects live DB credentials into the worker pod at runtime, bypassing the K8s Secret entirely when `vault.enabled=true`
+
+---
+
+## How does Vault agent injection work in Kubernetes?
+
+Vault agent injection is a **mutating admission webhook** pattern. The Vault injector intercepts pod creation and adds a sidecar container automatically based on pod annotations.
+
+**Flow:**
+
+```
+kubectl apply (worker Deployment)
+    │
+    ▼
+Kyverno webhook (policy check)
+    │
+    ▼
+vault-agent-injector webhook (mutation)
+    └─ reads vault.hashicorp.com/* annotations
+    └─ adds vault-agent init container + sidecar to the pod spec
+    │
+    ▼
+Pod starts
+    ├─ vault-agent (init): authenticates via K8s service account token
+    │     └─ Vault verifies token with K8s API, checks role binding
+    │     └─ writes secrets to shared emptyDir at /vault/secrets/
+    │
+    ├─ vault-agent (sidecar): runs continuously, refreshes secrets on TTL expiry
+    │
+    └─ worker container: reads /vault/secrets/db (a rendered HCL template)
+```
+
+**Key annotation:** `vault.hashicorp.com/agent-inject-template-<name>` defines a Go template that renders the secret into any format the app needs:
+
+```yaml
+vault.hashicorp.com/agent-inject-template-db: |
+  {{- with secret "secret/data/voting-app/db" -}}
+  DB_USERNAME={{ .Data.data.username }}
+  DB_PASSWORD={{ .Data.data.password }}
+  {{- end }}
+```
+
+**Kubernetes auth method:** the worker uses its `ServiceAccount` token (projected into the pod at `/var/run/secrets/kubernetes.io/serviceaccount/token`) to authenticate. Vault verifies the token against the K8s API and checks whether the service account is bound to a Vault role:
+
+```bash
+vault write auth/kubernetes/role/worker \
+  bound_service_account_names=worker \
+  bound_service_account_namespaces=default \
+  policies=voting-app-policy \
+  ttl=1h
+```
+
+**Helm template escaping:** Vault HCL templates use `{{ }}` — the same syntax as Helm. To pass Vault directives through Helm without evaluation, escape them:
+
+```yaml
+# In a Helm template — passes raw HCL to Vault annotation
+vault.hashicorp.com/agent-inject-template-db: |
+  {{ "{{" }}- with secret "{{ .Values.vault.secretPath }}" -{{ "}}" }}
+  DB_USERNAME={{ "{{" }} .Data.data.username {{ "}}" }}
+  {{ "{{" }}- end {{ "}}" }}
+```
+
+---
+
+## What is Cosign keyless signing and how does it work?
+
+Cosign is a tool for signing and verifying OCI container images. Keyless signing removes the need to manage a long-lived private key — instead, it uses a short-lived certificate issued by Sigstore's certificate authority, bound to a workload identity (in CI, the GitHub Actions OIDC token).
+
+**Signing flow (in GitHub Actions):**
+
+```
+CI workflow runs on staging push
+    │
+    ├─ push image to GHCR as ghcr.io/neyamatullah/vote:<sha>
+    │
+    └─ cosign sign --yes ghcr.io/neyamatullah/vote:<sha>
+          │
+          ├─ GitHub requests OIDC token for this workflow run
+          │     └─ token contains: repository, workflow URL, actor
+          │
+          ├─ Cosign exchanges token for a short-lived certificate from Fulcio (Sigstore CA)
+          │
+          ├─ Signs the image digest with the ephemeral key
+          │
+          └─ Records signature + certificate in Rekor (public transparency log)
+                └─ Stores signature as OCI artifact alongside the image in GHCR
+```
+
+**Verification flow (Kyverno `require-signed-images` policy):**
+
+```yaml
+verifyImages:
+  - imageReferences:
+      - "ghcr.io/neyamatullah/*"
+    attestors:
+      - entries:
+          - keyless:
+              subject: "https://github.com/NeyamatUllah/*"
+              issuer: "https://token.actions.githubusercontent.com"
+```
+
+At `kubectl apply`, Kyverno fetches the signature from GHCR, looks it up in Rekor, and verifies the certificate was issued for the expected GitHub workflow subject. No private key anywhere in the system.
+
+**`COSIGN_EXPERIMENTAL=true`** — enables keyless mode (no `--key` flag needed). The resulting signature is stored as a separate OCI tag alongside the image (e.g. `sha256-abc123.sig`).
+
+**Why keep `require-signed-images` in Audit mode initially?** Kyverno must be able to reach Sigstore's TUF (The Update Framework) roots to verify signatures. On a fresh cluster or in a network-restricted environment this may fail, which would block all pod admissions. Verify the full chain works before switching to Enforce.
+
+---
+
+## Why does Falco show container_name=NA on Minikube with the Docker driver?
+
+This is a fundamental architectural limitation of how Minikube's Docker driver works.
+
+**Normal Falco operation (bare-metal or VM driver):**
+
+```
+Host kernel
+    └─ eBPF probes capture syscalls
+    └─ Falco reads cgroup IDs from /sys/fs/cgroup
+    └─ Maps cgroup ID → container ID → pod name via CRI socket
+    └─ Output: container.name=vote, k8s.pod.name=vote-abc123
+```
+
+**Minikube Docker driver:**
+
+```
+Host kernel
+    └─ eBPF probes capture syscalls on the host kernel
+    │
+    └─ Minikube node runs as a Docker container ("minikube")
+            └─ containerd runs inside the Minikube container
+                    └─ vote pod runs inside containerd
+```
+
+Falco's eBPF probes capture at the **host kernel** level. The cgroup IDs it sees belong to the Minikube Docker container, not to individual pod containers. The CRI socket that Falco uses to resolve `container ID → name` is the one inside the Minikube container, which the host-level Falco cannot access. Result: every event shows `container.name=<NA>`.
+
+**What still works:**
+- The Falco DaemonSet runs and rules are loaded (`schema validation: ok`)
+- All syscalls are captured
+- Rules fire — you see the events in logs
+- Only the container name enrichment is missing
+
+**Fix:**
+- Use `minikube start --driver=kvm2` or `--driver=virtualbox` — Minikube runs in a full VM, K8s pods run directly on the VM's kernel, and Falco can map cgroups correctly
+- On bare-metal Kubernetes (kubeadm, k3s) the issue does not exist
 
 ---

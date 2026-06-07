@@ -69,9 +69,25 @@ db:
       cpu: 100m
       memory: 128Mi
 
+externalDb:
+  enabled: false
+  host: ""
+  port: 5432
+  user: postgres
+  password: ""
+  name: postgres
+
+externalRedis:
+  enabled: false
+  host: ""
+  port: 6379
+
 ingress:
   host: voting.local
   className: nginx
+  tls:
+    enabled: false
+    secretName: voting-tls
 
 networkPolicy:
   enabled: true
