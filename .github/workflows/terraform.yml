@@ -7,9 +7,6 @@ on:
       - staging
     paths:
       - "terraform/**"
-    paths-ignore:
-      - "docs/**"
-      - "**.md"
   pull_request:
     branches:
       - staging
