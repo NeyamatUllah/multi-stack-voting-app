@@ -1919,6 +1919,99 @@ App:            vote HTTP 200, result HTTP 200 ✅
 | DNS automation | **ExternalDNS** |
 | GitOps delivery | **ArgoCD** or **Flux** |
 
+### Phase 8 — Actual Results (2026-06-07)
+
+**Files added:**
+
+| File | Purpose |
+|------|---------|
+| `terraform/versions.tf` | Provider pins: `azurerm ~> 3.110`, `random ~> 3.6`, `terraform >= 1.7`; commented-out `backend "azurerm"` block for remote state |
+| `terraform/variables.tf` | All root input variables — location, AKS node count/SKU, PostgreSQL SKU/version/credentials, Redis SKU/capacity/family, DNS zone name |
+| `terraform/main.tf` | Resource group + 4 module calls wiring outputs between modules |
+| `terraform/outputs.tf` | Root outputs: AKS cluster name, kubeconfig (sensitive), PostgreSQL FQDN, Redis hostname/ports, primary access key (sensitive) |
+| `terraform/modules/networking/` | VNet `10.0.0.0/16`; subnets `frontend` (10.0.1/24), `backend` (10.0.2/24), `data` (10.0.3/24 — delegated to PostgreSQL Flexible Server); 3 NSGs + associations |
+| `terraform/modules/aks/` | `azurerm_kubernetes_cluster`: Azure CNI + Calico NetworkPolicy, AAD RBAC, OMS agent → Log Analytics workspace (30-day retention) |
+| `terraform/modules/postgres/` | Private DNS zone, VNet link, `azurerm_postgresql_flexible_server` (B_Standard_B1ms, v15, 32 GB), `postgres` database |
+| `terraform/modules/redis/` | `azurerm_redis_cache` Basic C0, non-SSL port enabled for app compatibility, TLS 1.2 minimum |
+| `.github/workflows/terraform.yml` | `validate` job: `terraform fmt -check` + `init -backend=false` + `validate`; `tfsec` job: aquasecurity/tfsec-action, gated on `terraform/**` path changes; `paths-ignore: docs/**` |
+| `argocd/install-values.yaml` | ArgoCD Helm values: TLS ingress, `server.insecure: false`, read-only default RBAC |
+| `argocd/app-of-apps.yaml` | Root ArgoCD Application pointing to `argocd/apps/`; `automated: prune + selfHeal` |
+| `argocd/apps/voting-app.yaml` | ArgoCD Application for the voting-app Helm chart with AKS cloud overrides (`externalDb`, `externalRedis`, TLS ingress) |
+| `argocd/apps/cert-manager.yaml` | ArgoCD Application: cert-manager v1.15.x with `installCRDs: true` |
+| `argocd/apps/external-dns.yaml` | ArgoCD Application: ExternalDNS 1.14.x with Azure DNS provider; reads credentials from `azure-config-file` secret |
+| `argocd/manifests/cluster-issuer-staging.yaml` | cert-manager ClusterIssuer for Let's Encrypt staging (HTTP-01 challenge via ingress-nginx) |
+| `argocd/manifests/cluster-issuer-prod.yaml` | cert-manager ClusterIssuer for Let's Encrypt production |
+
+**Files modified:**
+
+| File | Change |
+|------|--------|
+| `helm/voting-app/values.yaml` | Added `externalDb` block (enabled, host, port, user, password, name), `externalRedis` block (enabled, host, port), `ingress.tls` block (enabled, secretName) |
+| `helm/voting-app/templates/configmap.yaml` | `REDIS_HOST`/`REDIS_PORT`/`DB_HOST`/`DB_NAME` now pull from `externalRedis`/`externalDb` values when enabled; fall back to in-cluster `redis`/`db` service names |
+| `helm/voting-app/templates/ingress.yaml` | Added `cert-manager.io/cluster-issuer: letsencrypt-prod` annotation and `spec.tls` block, both gated by `ingress.tls.enabled` |
+| `helm/voting-app/templates/db-deployment.yaml` | Wrapped with `{{- if not .Values.externalDb.enabled }}` — skipped when using Azure PostgreSQL |
+| `helm/voting-app/templates/db-service.yaml` | Wrapped with `{{- if not .Values.externalDb.enabled }}` |
+| `helm/voting-app/templates/db-pvc.yaml` | Wrapped with `{{- if not .Values.externalDb.enabled }}` |
+| `helm/voting-app/templates/redis-deployment.yaml` | Wrapped with `{{- if not .Values.externalRedis.enabled }}` — skipped when using Azure Cache for Redis |
+| `helm/voting-app/templates/redis-service.yaml` | Wrapped with `{{- if not .Values.externalRedis.enabled }}` |
+
+**Key design decisions:**
+
+| Decision | Reasoning |
+|----------|-----------|
+| Terraform modules (networking / aks / postgres / redis) | Separation of concerns — each module can be tested, versioned, and reused independently. Root `main.tf` only wires outputs between modules |
+| Azure CNI + Calico on AKS | Consistent with Phase 5 Minikube setup (`--cni=calico`); Azure CNI puts pod IPs in the VNet subnet, making Calico NetworkPolicy enforcement reliable |
+| PostgreSQL Flexible Server VNet integration (delegated subnet) | Server registers its FQDN in a private DNS zone linked to the VNet — pods resolve to the private IP without public internet traversal. Delegation makes the `data` subnet exclusively for PostgreSQL |
+| Redis Basic C0 with non-SSL port enabled | Basic/Standard tiers do not support private endpoints or VNet injection. Non-SSL port enabled for compatibility with the current Flask/C# Redis clients that do not configure SSL. Production path: upgrade to Premium tier (VNet injection), disable non-SSL port, update apps to connect on port 6380 with SSL |
+| `tfsec:ignore:AVD-AZU-0028` on Redis | Documented known limitation — not a silent bypass. The ignore annotation is on the resource with an explanatory comment, so future engineers understand the tradeoff |
+| `tfsec:ignore:AVD-AZU-0040` on AKS | Private cluster (no public API server) adds significant operational complexity (VPN/bastion for `kubectl` access). Acceptable for a learning/portfolio cluster; production would enable it |
+| `externalDb` / `externalRedis` flags in Helm | Backward-compatible — default values keep in-cluster db and redis, so all existing Minikube workflows continue to work unchanged. Cloud deployment flips the flags without template changes |
+| Email placeholder in ClusterIssuer manifests | Real email omitted from the public portfolio repo. Operator replaces `admin@example.com` before applying — noted in both manifest comments |
+| ArgoCD app-of-apps pattern | Single root Application in ArgoCD that manages all child Applications from `argocd/apps/`. Adding a new tool = adding one YAML file; ArgoCD self-heals on git push |
+
+**Deploy commands (AKS):**
+
+```bash
+# 1 — Provision infrastructure
+cd terraform
+terraform init
+terraform plan -var postgres_admin_password='<strong-password>'
+terraform apply -var postgres_admin_password='<strong-password>'
+
+# 2 — Connect to AKS
+terraform output -raw kube_config > ~/.kube/config
+kubectl get nodes
+
+# 3 — Install ArgoCD
+helm repo add argo https://argoproj.github.io/argo-helm
+helm upgrade --install argocd argo/argo-cd \
+  --namespace argocd --create-namespace \
+  --version 7.x -f argocd/install-values.yaml
+
+# 4 — Apply ClusterIssuers (after cert-manager is ready)
+kubectl apply -f argocd/manifests/
+
+# 5 — Bootstrap app-of-apps
+kubectl apply -f argocd/app-of-apps.yaml
+
+# ArgoCD then reconciles cert-manager, ExternalDNS, and voting-app automatically.
+# Update argocd/apps/voting-app.yaml with real Terraform output values before applying.
+```
+
+**Verification results (scaffolding — no live Azure environment):**
+
+```
+terraform fmt -check -recursive          ✅ (no formatting violations)
+terraform init -backend=false            ✅ (providers resolved)
+terraform validate                       ✅ (configuration is valid)
+tfsec scan                               ✅ (AVD-AZU-0028 + AVD-AZU-0040 suppressed with documented ignore annotations)
+helm template (default values)           ✅ all 5 in-cluster resources rendered
+helm template (externalDb/Redis=true)    ✅ db + redis Deployment/Service/PVC absent
+helm template (ingress.tls.enabled=true) ✅ cert-manager annotation + TLS block present
+```
+
+**Branch/PRs:** `feature/phase8-cloud-iac` → PR #62 → `dev`; promoted via PRs #63/#64 → `staging` → `main`
+
 ---
 
 ## Consolidated Tools Reference

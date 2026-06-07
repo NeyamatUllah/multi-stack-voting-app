@@ -19,19 +19,19 @@ variable "environment" {
 variable "aks_node_count" {
   type        = number
   description = "Number of nodes in the default AKS node pool."
-  default     = 2
+  default     = 1
 }
 
 variable "aks_node_vm_size" {
   type        = string
   description = "VM SKU for AKS nodes."
-  default     = "Standard_D2s_v3"
+  default     = "Standard_B2ms"
 }
 
 variable "kubernetes_version" {
   type        = string
   description = "Kubernetes version for the AKS cluster."
-  default     = "1.29"
+  default     = "1.34"
 }
 
 variable "postgres_admin_username" {
